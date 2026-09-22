@@ -1,11 +1,23 @@
 # Lab 07 — Velero: configure a Backup Storage Location (BSL)
 
-**Learn:** where Velero stores its backups (a **Backup Storage Location**, or *BSL*) and how to
-configure it **the NKP/Kommander way** — from the **UI** (via the AppDeployment overrides) *and* from
-the **CLI** — plus the native Velero **CRDs** behind it.
+**Learn:** where Velero stores backups (a **Backup Storage Location**, or *BSL*), how to configure it
+**the NKP/Kommander way** — from the **UI** (via the AppDeployment overrides) *and* the **CLI** — how to
+write **backup policies** (`Schedule`s), and how to back up a **persistent app** (volume data). Plus the
+native Velero **CRDs** behind all of it.
 
 > Reference environment (NKP): Velero **v1.18.0** (chart **12.0.0**), BSLs `default` (object store) +
 > `secondary-offsite` (MinIO/S3), schedules `velero-default` & `velero-secondary-manifests`.
+
+| File | What |
+|---|---|
+| [`credentials-secret.example.yaml`](credentials-secret.example.yaml) | S3 credentials Secret (`cloud` INI) |
+| [`velero-overrides.example.yaml`](velero-overrides.example.yaml) | the override ConfigMap (BSLs + schedules) the UI edits |
+| [`velero-appdeployment.example.yaml`](velero-appdeployment.example.yaml) | the `AppDeployment` wiring the override |
+| [`bsl-cr.example.yaml`](bsl-cr.example.yaml) / [`schedule-cr.example.yaml`](schedule-cr.example.yaml) | raw `BackupStorageLocation` / `Schedule` CRs |
+| [`persistent-app.yaml`](persistent-app.yaml) | a small **stateful** app (Postgres + PVC) to back up |
+| [`backup-policy.example.yaml`](backup-policy.example.yaml) | a **backup policy** (`Schedule`): when/what/where/retention/volumes |
+| [`restore.example.yaml`](restore.example.yaml) | a **`Restore`** (with volume data) |
+| [`verify.sh`](verify.sh) | inspect BSLs/schedules/backups + a smoke test |
 
 ---
 
@@ -42,8 +54,8 @@ Inspect the live state:
 NS=<velero-ns>                                  # NKP: `kommander` (mgmt) or the workspace ns
 kubectl -n "$NS" get appdeployment velero -o yaml | head -30
 kubectl -n "$NS" get backupstoragelocation
-kubectl -n "$NS" get schedule
-kubectl -n "$NS" get backup | tail
+kubectl -n "$NS" get schedules.velero.io
+kubectl -n "$NS" get backups.velero.io | tail
 ```
 
 ---
@@ -117,14 +129,97 @@ A BSL stuck **`Unavailable`** almost always means **credentials** (wrong keys / 
 kubectl -n "$NS" logs deploy/velero --tail=50 | grep -iE "error|bucket|credential"
 ```
 
-## 7. Schedules & where backups go
+## 7. Backup policies (`Schedule`s) & backing up **persistent apps**
 
-The `schedules:` block in the values creates `Schedule` CRDs (NKP names them `velero-<key>`, e.g.
-`velero-default`, `velero-secondary-manifests`). Each `template.storageLocation` selects **which BSL**
-that schedule writes to. `snapshotVolumes: false` = **manifests only** (no volume data).
+A **backup policy** is a Velero **`Schedule`** CR — *when* it runs, *what* it captures, *where* it goes and
+*how long* it's kept. With the AppDeployment override, the `schedules:` block in the values creates them
+(NKP names them `velero-<key>`, e.g. `velero-default`); you can also apply a `Schedule` directly — see
+[`backup-policy.example.yaml`](backup-policy.example.yaml).
+
+### 7.1 The policy fields (a `Schedule.template` is exactly a `Backup` spec)
+
+| Field | Meaning |
+|---|---|
+| `schedule` | **when** — cron (UTC): `"0 3 * * *"`, `"*/30 * * * *"`, `@every 6h` |
+| `paused` | suspend the policy without deleting it |
+| `includedNamespaces` / `excludedNamespaces` | **what** (namespaces; `["*"]` = all) |
+| `includedResources` / `excludedResources` | **what** (resource types: `deployments,secrets,persistentvolumeclaims,…`) |
+| `labelSelector` / `orLabelSelectors` | **what** (only objects carrying these labels) |
+| `includeClusterResources` | also capture cluster-scoped objects (CRDs, ClusterRoles, …) |
+| `snapshotVolumes` | include **volumes** in the backup |
+| `defaultVolumesToFsBackup` | back volumes up with the **file-system** uploader (**Kopia**/Restic) |
+| `storageLocation` | **where** (which **BSL**; omit = the default BSL) |
+| `ttl` | **retention** — delete the backup after this (`720h` = 30 days) |
+| `hooks` | run commands around the backup (quiesce a DB → *application-consistent*) |
+
+A one-off **`Backup`** uses the same fields (it's what a `Schedule` runs on a cron) — handy to test.
+
+### 7.2 Backing up a **persistent** app (volume data)
+
+The manifests-only schedules in §4 do **not** copy data (`snapshotVolumes: false`). Two ways to capture volumes:
+
+| | **File-system backup** (Kopia/Restic) | **CSI snapshot** |
+|---|---|---|
+| What | Velero reads the **files** and uploads them to the **BSL** | the storage's **CSI** takes a point-in-time copy |
+| Enable | `snapshotVolumes: true` + `defaultVolumesToFsBackup: true` | `snapshotVolumes: true` + CSI snapshot support |
+| Needs | the Velero **node-agent** DaemonSet on every node | Velero `--features=EnableCSI` + a CSI driver + a **`VolumeSnapshotClass`** |
+| Data lives | **in the BSL** → portable / restores anywhere | in the storage backend (needs a compatible class) |
+| Good for | most workloads, cross-cluster restores | large volumes, storage-native snapshots |
+
+**Check the prerequisites:**
+```bash
+NS=<velero-ns>
+kubectl -n "$NS" get ds velero-node-agent      # FS backup needs one node-agent pod per node
+kubectl get volumesnapshotclass                # CSI snapshot needs a VolumeSnapshotClass
+kubectl get crd | grep -E 'volumesnapshots.*snapshot\.storage'   # CSI snapshot CRDs
+```
+No node-agent? enable it via the Velero values (`deployNodeAgent: true` / `nodeAgent.enabled: true`,
+per chart) through the AppDeployment override — then it reconciles like any other value.
+
+### 7.3 Try it: back up **and restore** a stateful app
 
 ```bash
-kubectl -n "$NS" get schedule -o custom-columns='NAME:.metadata.name,CRON:.spec.schedule,BSL:.spec.template.storageLocation,PAUSED:.spec.paused'
+NS=<velero-ns>; APP=<app-namespace>
+# 1) deploy a small stateful app (Postgres + PVC) and seed data
+kubectl apply -f persistent-app.yaml                 # rendered with your ${NAMESPACE}
+kubectl -n "$APP" exec deploy/postgres -- psql -U postgres -c \
+  "create table t(i int); insert into t values (1),(2),(3);"
+
+# 2) a POLICY that captures the data (edit <BSL>) — apply it in the VELERO namespace
+kubectl -n "$NS" apply -f backup-policy.yaml
+
+# 3) trigger one run now (identical fields to the policy) and watch it
+kubectl -n "$NS" apply -f - <<YAML
+apiVersion: velero.io/v1
+kind: Backup
+metadata: { name: pg-once, namespace: $NS }
+spec:
+  includedNamespaces: ["$APP"]
+  snapshotVolumes: true
+  defaultVolumesToFsBackup: true
+  ttl: 720h
+  storageLocation: <BSL>
+YAML
+kubectl -n "$NS" get backups.velero.io pg-once -w
+
+# 4) prove the VOLUME was captured (file-system backup -> PodVolumeBackup objects)
+kubectl -n "$NS" get podvolumebackups.velero.io
+
+# 5) restore into a NEW namespace to prove the data comes back
+#    edit restore.example.yaml (backupName + namespaceMapping) then:
+kubectl -n "$NS" apply -f restore.yaml
+kubectl -n "$NS" get restores.velero.io -w
+kubectl -n "$APP-restore" exec deploy/postgres -- psql -U postgres -c "select * from t;"
+```
+
+> **Consistency matters.** A file-system backup copies files *while the app runs*; for a database add a
+> Velero **hook** (`pre`/`post` `exec`) to quiesce it, or use a **CSI snapshot**. The Postgres here is a
+> lab toy — not a production backup strategy.
+
+### 7.4 Where a policy writes
+Each `template.storageLocation` selects **which BSL** that policy writes to:
+```bash
+kubectl -n "$NS" get schedules.velero.io -o custom-columns='NAME:.metadata.name,CRON:.spec.schedule,BSL:.spec.template.storageLocation,FS:.spec.template.defaultVolumesToFsBackup,PAUSED:.spec.paused'
 ```
 
 ## 8. Troubleshooting & security
@@ -135,6 +230,10 @@ kubectl -n "$NS" get schedule -o custom-columns='NAME:.metadata.name,CRON:.spec.
 | Backup `Failed`/`ValidationFailed` | the referenced `storageLocation` name doesn't exist; check the BSL name |
 | Overrides seem ignored | confirm `AppDeployment.spec.configOverrides.name` == your ConfigMap; create the CM **before** the AppDeployment |
 | Hand-made CR "reverts" | NKP's BSL updater owns it — change the **values** instead (Path A/B) |
+| Backup `Completed` but `get podvolumebackups.velero.io` is empty | volumes weren't captured — set `snapshotVolumes: true` **and** `defaultVolumesToFsBackup: true` (FS), and make sure the **node-agent** DaemonSet is running |
+| Restore brought objects back but the volume is empty | `Restore.spec.restorePVs` is `false` by default → set it **`true`**, and back up with volumes enabled |
+| CSI snapshot fails (`VolumeSnapshotClass` not found / `EnableCSI`) | enable the CSI feature + provide a `VolumeSnapshotClass`, or fall back to the file-system backup |
+| Restored DB inconsistent | the app wasn't quiesced — add a `pre`/`post` Velero **hook**, or use CSI snapshots |
 
 **Security:** the credentials Secret is a **long-lived S3 credential** — restrict the bucket, `chmod 600`,
 never commit it; prefer short-lived/rotated keys where your S3 supports it.

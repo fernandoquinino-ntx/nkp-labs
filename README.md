@@ -17,7 +17,7 @@ The manifests are **portable templates** (they use `${PLACEHOLDERS}`); you suppl
 | 04 | [04-apache-traefik-ingress](04-apache-traefik-ingress/) | route a **hostname → Service** through the cluster ingress controller |
 | 05 | [05-nkp-appdeployment](05-nkp-appdeployment/) | deploy an application the **NKP way** (`AppDeployment` + config overrides) |
 | 06 | [06-long-lived-token-kubeconfig](06-long-lived-token-kubeconfig/) | a **long-lived ServiceAccount token** + a ready **kubeconfig** for an app/CI (least privilege) |
-| 07 | [07-velero-bsl](07-velero-bsl/) | configure a **Velero Backup Storage Location (BSL)** — from the **UI** (AppDeployment overrides) and the **CLI**, plus the Velero/NKP **CRDs** |
+| 07 | [07-velero-bsl](07-velero-bsl/) | configure a **Velero Backup Storage Location (BSL)** (UI + CLI), write **backup policies** (`Schedule`s), **back up & restore a persistent app** (volumes), + the Velero/NKP **CRDs** |
 | 08 | [08-splunk-otel-helm](08-splunk-otel-helm/) | install the **Splunk OpenTelemetry Collector** with **plain `helm`** (no catalog) — every setting explained, **logs + metrics** to Splunk over HEC, and **troubleshooting** |
 
 ## Procedures (step-by-step, copy-paste)

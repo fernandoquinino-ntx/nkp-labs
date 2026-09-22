@@ -1,0 +1,23 @@
+# RESTORE a backup (including its volume data).
+#
+# COPY -> restore.yaml ; set the backup name + namespaces ; apply in the Velero namespace:
+#   kubectl -n <velero-ns> apply -f restore.yaml
+#   kubectl -n <velero-ns> get restores.velero.io -w     # watch phase -> Completed
+#
+# List what to restore from:
+#   kubectl -n <velero-ns> get backups.velero.io
+#   kubectl -n <velero-ns> exec deploy/velero -c velero -- /velero backup get
+apiVersion: velero.io/v1
+kind: Restore
+metadata:
+  name: postgres-restore
+  namespace: ${VELERO_NS}
+spec:
+  backupName: <BACKUP_NAME>              # e.g. postgres-daily-20260101120304
+  includedNamespaces: ["${NAMESPACE}"]
+  restorePVs: true                       # restore the persistent volumes too (FS or CSI)
+  # existingResourcePolicy: update       # or "none" (default: skip existing objects)
+  # preserveNodePorts: true              # keep the original nodePort on Services
+  # namespaceMapping:                    # restore into a DIFFERENT namespace (great for drills)
+  #   "${NAMESPACE}": "${NAMESPACE}-restore"
+  # labelSelector: { matchLabels: { app: postgres } }

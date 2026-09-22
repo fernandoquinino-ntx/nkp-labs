@@ -1,0 +1,74 @@
+# A small STATEFUL app (PostgreSQL) to practise backing up a workload WITH data.
+#   kubectl apply -f persistent-app.yaml
+#   # seed some data so a restore is meaningful:
+#   kubectl -n <ns> exec deploy/postgres -- psql -U postgres -c \
+#     "create table t(i int); insert into t values (1),(2),(3);"
+#
+# The PVC uses the cluster DEFAULT StorageClass (omit/override `storageClassName` as needed).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pg-secret
+  namespace: ${NAMESPACE}
+type: Opaque
+stringData:
+  POSTGRES_PASSWORD: "labpass"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pg-data
+  namespace: ${NAMESPACE}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  # storageClassName: <your-default-sc>     # default SC used if omitted
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: ${NAMESPACE}
+  labels: { app: postgres }
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate              # single RWO volume
+  selector:
+    matchLabels: { app: postgres }
+  template:
+    metadata:
+      labels: { app: postgres }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: pg-secret, key: POSTGRES_PASSWORD }
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: pg-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: ${NAMESPACE}
+  labels: { app: postgres }
+spec:
+  selector: { app: postgres }
+  ports:
+    - port: 5432
+      targetPort: 5432

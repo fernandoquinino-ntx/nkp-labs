@@ -1,0 +1,35 @@
+# A BACKUP POLICY = a Velero `Schedule` CR: WHEN + WHAT + WHERE + RETENTION (+ whether to copy data).
+#
+# COPY -> backup-policy.yaml ; set <BSL> (a BackupStorageLocation name) and the namespace ; apply it in
+# the **Velero namespace** (${VELERO_NS}):
+#   kubectl -n <velero-ns> apply -f backup-policy.yaml
+#
+# Every `template.*` field below is the same schema as a one-off `Backup` — a Schedule just runs it on a cron.
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: postgres-daily
+  namespace: ${VELERO_NS}
+spec:
+  schedule: "0 3 * * *"            # WHEN — cron (UTC). e.g. "*/30 * * * *", "@every 6h"
+  paused: false                    # set true to suspend the policy
+  # ------------------------------------------------------------------ WHAT
+  template:
+    includedNamespaces: ["${NAMESPACE}"]          # which namespaces to back up ("*" = all)
+    # includedResources: ["deployments","services","persistentvolumeclaims","secrets","configmaps","statefulsets"]
+    # excludedResources: ["events","endpoints","controllerrevisions"]
+    # labelSelector: { matchLabels: { app: postgres } }   # only objects with these labels
+    # orLabelSelectors: []
+    includeClusterResources: true                 # also cluster-scoped objects used by the workload
+    # ------------------------------------------------------------------ DATA (volumes)
+    snapshotVolumes: true                         # capture pod volumes
+    defaultVolumesToFsBackup: true                # use FILE-SYSTEM (Kopia/Restic) for pod volumes
+    #   ↑ REQUIRES the Velero **node-agent** DaemonSet on every node (see the README §7).
+    #   For CSI snapshots instead: set `defaultVolumesToFsBackup: false`, add a
+    #   `volumeSnapshotClass`/CSI setup, and keep `snapshotVolumes: true`.
+    # uploaderConfig: { parallelFilesUpload: 10 }
+    # ------------------------------------------------------------------ WHERE + RETENTION
+    storageLocation: <BSL>                        # a BackupStorageLocation (omit -> the default BSL)
+    ttl: 720h                                     # RETENTION — delete the backup after 30 days
+    # storageLocation + ttl are also settable per-namespace via annotations
+    # (backup.velero.io/backup-volumes, backup.velero.io/backup-volumes-excludes for per-pod volume opt-in/out)
