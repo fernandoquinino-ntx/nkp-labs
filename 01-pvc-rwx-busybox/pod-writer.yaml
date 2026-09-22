@@ -1,4 +1,6 @@
 # One pod that WRITES to the shared RWX volume.
+# A SOFT anti-affinity makes the writer/reader *prefer* different nodes — so RWX is really exercised
+# across nodes (it won't block scheduling if there's only one node).
 apiVersion: v1
 kind: Pod
 metadata:
@@ -6,6 +8,14 @@ metadata:
   namespace: ${NAMESPACE}
   labels: { app: rwx-demo, role: writer }
 spec:
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchLabels: { app: rwx-demo }
+            topologyKey: kubernetes.io/hostname
   containers:
     - name: writer
       image: busybox:1.36
