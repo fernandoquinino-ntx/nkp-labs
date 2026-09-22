@@ -307,6 +307,7 @@ index=k8s_logs sourcetype=kube:kernel   earliest=-15m | head 20
 | `x509: certificate signed by unknown authority` | Splunk HEC cert is `SplunkCommonCA` | `splunkPlatform.insecureSkipVerify: true` |
 | `kubelet_stats` accepted **0**, but logs and other metrics are fine, **no** `Dropping data` | kubelet cert has **no IP SAN** | `agent.config.receivers.kubelet_stats.insecure_skip_verify: true` |
 | Metrics from an app / kube-state-metrics never appear | the collector does not scrape Prometheus targets by default | enable `autodetect.prometheus`, `agent.discovery`, or a manual `prometheus/*` receiver (see “How metrics are actually collected”) |
+| `warn … failed to fetch container metrics … empty containerID` | a container (e.g. `kube-bench`/`pause`) exposes no containerID, so `container.id` enrichment is skipped | **benign** — ignore; the receiver keeps working |
 | `helm upgrade` error `minLength: got 0, want 1` | empty `splunkPlatform.index` | always set a real index (the schema has no “omit index” mode) |
 | `no matches for kind` / chart not found | repo not added/updated | `helm repo add … && helm repo update`; check `--version` |
 | `cannot re-use a name that is still in use` | a release with the same name already exists | uninstall it first, or change `OTEL_NAMESPACE`/`OTEL_RELEASE` (see “Before you start”) |
