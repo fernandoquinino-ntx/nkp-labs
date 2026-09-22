@@ -1,6 +1,21 @@
-# your real values + generated output — never commit
+# your real values + generated output — NEVER commit these
 local.env
+.env
 rendered/
+
+# kubeconfigs you generate while experimenting (e.g. lab 06: ./lab-kubeconfig)
+kubeconfig
+kubeconfig.*
+kubeconfig-*
+*-kubeconfig
+*.kubeconfig
+
+# filled-in copies of the lab *.example.yaml templates (they hold real values/secrets)
+*overrides.yaml
+*credentials.yaml
+bsl-cr.yaml
+schedule-cr.yaml
+appdeployment.yaml
 
 # os / editor
 .DS_Store
