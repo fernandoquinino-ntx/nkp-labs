@@ -74,6 +74,20 @@ UI**, not with a script.
 **Tools:** `kubectl`, `helm` (v3). `curl` for the HEC probe. Your machine must reach the cluster; the
 **cluster nodes** must reach your Splunk HEC endpoint (outbound `:8088`).
 
+**Before you start — three common traps:**
+
+- **Point kubectl at the right cluster.** The lab uses your ambient kubeconfig:
+  `kubectl config current-context`. If it is unset, `export KUBECONFIG=<your kubeconfig>` first —
+  otherwise every check reports “nothing found”.
+- **Do not run the lab with `sudo`.** It creates `rendered/` as your user; a `sudo` run leaves
+  root-owned files and the next `render.sh` fails with `rm: cannot remove … Permission denied`
+  (fix: `sudo rm -rf rendered`).
+- **Name clash:** the lab installs the Helm release `splunk-otel-collector` in namespace
+  `splunk-otel`. If the collector is **already installed** there (e.g. via the NKP catalog /
+  AppDeployment), either remove that first or pick different values — `helm` refuses to reuse a
+  release name (`cannot re-use a name that is still in use`), and two collectors on the same nodes
+  would double-ship.
+
 **Splunk side** (do this first — the collector is useless without it):
 
 1. Create the indexes in the Splunk UI:
@@ -222,6 +236,9 @@ index=k8s_logs sourcetype=kube:kernel   earliest=-15m | head 20
 | `kubelet_stats` accepted **0**, but logs and other metrics are fine, **no** `Dropping data` | kubelet cert has **no IP SAN** | `agent.config.receivers.kubelet_stats.insecure_skip_verify: true` |
 | `helm upgrade` error `minLength: got 0, want 1` | empty `splunkPlatform.index` | always set a real index (the schema has no “omit index” mode) |
 | `no matches for kind` / chart not found | repo not added/updated | `helm repo add … && helm repo update`; check `--version` |
+| `cannot re-use a name that is still in use` | a release with the same name already exists | uninstall it first, or change `OTEL_NAMESPACE`/`OTEL_RELEASE` (see “Before you start”) |
+| `render.sh: Permission denied` / `rm: cannot remove rendered/…` | the lab was run once with `sudo` | `sudo rm -rf rendered` and re-run **without** `sudo` |
+| `kubectl` finds nothing / `current-context is not set` | kubectl not pointed at the cluster | `kubectl config use-context …` or `export KUBECONFIG=…` |
 | `helm` says release exists but nothing runs | wrong namespace / release name | `helm -n <ns> list -a`; use the same `-n`/release as install |
 | Managed cluster never updates (if you later wrap this in an AppDeployment) | Kommander snapshots the override ConfigMap | bump the AppDeployment spec — see the nkp-deployer guide |
 
