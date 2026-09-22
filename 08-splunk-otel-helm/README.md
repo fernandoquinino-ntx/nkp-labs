@@ -158,6 +158,78 @@ Why **DaemonSet + Deployment**? The agent reads **node-local** data (needs one p
 cluster receiver reads the **Kubernetes API** (needs exactly one pod per cluster). If you lose one,
 you lose exactly that data subset.
 
+### How metrics are actually collected — and is Prometheus involved?
+
+The collector **pulls (scrapes)** on a fixed interval (`collection_interval: 10s`); nothing is pushed
+unless an app sends OTLP to the agent. Three metric sources feed **one** pipeline → **one** exporter.
+
+**Agent — DaemonSet, one pod per node (node-local sources):**
+
+| Receiver | Pulls from | Reaches it via | Metric families |
+|---|---|---|---|
+| `host_metrics` | the **node kernel** | scrapes `/proc` + `/sys` via the `/hostfs` mount (`root_path`) | CPU, memory, disk I/O, filesystem, load, network, paging, processes (`system.*`) |
+| `kubelet_stats` | **kubelet** `https://${K8S_NODE_IP}:10250` | service-account auth; reads `/stats/summary` + cAdvisor | `k8s.pod.*`, `k8s.container.*`, `k8s.node.*` usage |
+| `prometheus/agent` | **the collector itself** | scrapes its own `localhost:8889/metrics` | `otelcol_*` health/throughput |
+
+**Cluster receiver — Deployment, one pod per cluster (cluster-wide source):**
+
+| Receiver | Pulls from | Result |
+|---|---|---|
+| `k8s_cluster` | the **Kubernetes API** (watch) | `k8s.node.*`, `k8s.pod.phase`, `k8s.deployment.*`, `k8s.daemonset.*`, `k8s.statefulset.*`, `k8s.namespace.*`, `k8s.cluster.*` … |
+| `k8s_events` / `k8s_objects` | Kubernetes API | Events / objects — sent as **logs** to `k8s_logs`, not metrics |
+
+```
+receivers ─► memory_limiter ─► batch ─► resource_detection ─► resource ─► k8s_attributes/metrics
+   host_metrics + kubelet_stats + otlp   ─────────────► splunk_hec/platform_metrics ─► index k8s_metrics
+   k8s_cluster (cluster receiver)        ─────────────► (same exporter)
+```
+
+> **Is it from Prometheus?** **No — not by default.** The only receivers with “prometheus” in the name
+> (`prometheus/agent`, `prometheus/k8s_cluster_receiver`) scrape **the collector itself**, not your
+> workloads. With the default values the collector does **not** scrape **kube-state-metrics**,
+> **node-exporter**, application `/metrics`, or pods/services carrying `prometheus.io/scrape`
+> annotations (`autodetect.prometheus: false`, `agent.discovery.enabled: false`, and
+> `receiver_creator.receivers: null`).
+
+If you *do* want Prometheus endpoints, enable it explicitly — three options:
+
+```yaml
+# 1) easiest: scrape any pod/service that carries prometheus.io/scrape: "true"
+autodetect:
+  prometheus: true
+
+# 2) the chart's discovery mode (receiver_creator + k8s_observer auto-create receivers)
+agent:
+  discovery:
+    enabled: true
+
+# 3) fully manual: add a receiver and attach it to the metrics pipeline
+agent:
+  config:
+    receivers:
+      prometheus/myapp:
+        config:
+          scrape_configs:
+            - job_name: myapp
+              static_configs: [{ targets: ["myapp.monitoring.svc:9090"] }]
+    service:
+      pipelines:
+        metrics:
+          # lists are REPLACED, not merged -> re-list the defaults!
+          receivers: [host_metrics, kubelet_stats, otlp, prometheus/myapp]
+```
+
+⚠ If you run **kube-prometheus-stack** (Prometheus Operator + `ServiceMonitor`s), those metrics live
+in *that* Prometheus — the OTel collector does **not** read `ServiceMonitor`s, so it will not see
+them unless you scrape the endpoints explicitly (option 3) or use a Prometheus remote-write path.
+
+You can always discover the exact metric names that actually landed:
+
+```
+| mcatalog values(metric_name) WHERE index=k8s_metrics
+```
+
+
 ---
 
 ## 6. Step 3 — install
@@ -234,6 +306,7 @@ index=k8s_logs sourcetype=kube:kernel   earliest=-15m | head 20
 | `HTTP 403 "Forbidden"` | wrong/rotated token in the running pod | fix the token, then `kubectl -n splunk-otel rollout restart ds/<release>-agent` |
 | `x509: certificate signed by unknown authority` | Splunk HEC cert is `SplunkCommonCA` | `splunkPlatform.insecureSkipVerify: true` |
 | `kubelet_stats` accepted **0**, but logs and other metrics are fine, **no** `Dropping data` | kubelet cert has **no IP SAN** | `agent.config.receivers.kubelet_stats.insecure_skip_verify: true` |
+| Metrics from an app / kube-state-metrics never appear | the collector does not scrape Prometheus targets by default | enable `autodetect.prometheus`, `agent.discovery`, or a manual `prometheus/*` receiver (see “How metrics are actually collected”) |
 | `helm upgrade` error `minLength: got 0, want 1` | empty `splunkPlatform.index` | always set a real index (the schema has no “omit index” mode) |
 | `no matches for kind` / chart not found | repo not added/updated | `helm repo add … && helm repo update`; check `--version` |
 | `cannot re-use a name that is still in use` | a release with the same name already exists | uninstall it first, or change `OTEL_NAMESPACE`/`OTEL_RELEASE` (see “Before you start”) |

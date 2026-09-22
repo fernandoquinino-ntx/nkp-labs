@@ -221,3 +221,22 @@ clusterReceiver:
     limits:
       cpu: 500m
       memory: 500Mi
+
+# -----------------------------------------------------------------------------
+# Prometheus — OFF by default (this is what "is it from Prometheus?" means)
+# -----------------------------------------------------------------------------
+# WHY: the only receivers named `prometheus/*` in the default config scrape the
+#      COLLECTOR ITSELF (its own otelcol_* telemetry). Nothing scrapes
+#      kube-state-metrics, node-exporter, app /metrics, or pods annotated with
+#      prometheus.io/scrape unless you turn one of these on:
+#
+# autodetect:
+#   prometheus: true          # scrape any pod/service with prometheus.io/scrape: "true"
+#
+# agent:
+#   discovery:
+#     enabled: true           # chart discovery mode (receiver_creator + k8s_observer)
+#
+# ...or add a receiver by hand under agent.config (see the lab README, section
+# "How metrics are actually collected"). NOTE: ServiceMonitors from
+# kube-prometheus-stack are NOT read by this collector.
