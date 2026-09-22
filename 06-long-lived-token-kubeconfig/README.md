@@ -3,6 +3,8 @@
 **Learn:** give an external app (Jenkins, a script, an operator…) a **kubeconfig** of its own, backed
 by a **ServiceAccount**, with **least-privilege** RBAC — using a **long-lived (non-expiring) token**.
 
+> 📄 Standalone copy-paste procedure (no scripts): [`../docs/long-lived-token-kubeconfig.md`](../docs/long-lived-token-kubeconfig.md)
+
 ## The three ways to authenticate an app
 
 | Option | Expires? | How | When |

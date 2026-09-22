@@ -18,6 +18,12 @@ The manifests are **portable templates** (they use `${PLACEHOLDERS}`); you suppl
 | 05 | [05-nkp-appdeployment](05-nkp-appdeployment/) | deploy an application the **NKP way** (`AppDeployment` + config overrides) |
 | 06 | [06-long-lived-token-kubeconfig](06-long-lived-token-kubeconfig/) | a **long-lived ServiceAccount token** + a ready **kubeconfig** for an app/CI (least privilege) |
 
+## Procedures (step-by-step, copy-paste)
+
+| Doc | What |
+|---|---|
+| [docs/long-lived-token-kubeconfig.md](docs/long-lived-token-kubeconfig.md) | a **long-lived ServiceAccount token** + a ready **kubeconfig** for an app/CI (least privilege) |
+
 ## Quick start
 
 ```bash
