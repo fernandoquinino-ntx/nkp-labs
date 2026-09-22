@@ -4,9 +4,8 @@
 configure it **the NKP/Kommander way** — from the **UI** (via the AppDeployment overrides) *and* from
 the **CLI** — plus the native Velero **CRDs** behind it.
 
-> Validated against a live NKP deployment: Velero **v1.18.0** (chart **12.0.0**), BSLs
-> `default` (Rook-Ceph RGW) + `secondary-offsite` (MinIO/S3), schedules `velero-default` &
-> `velero-secondary-manifests`.
+> Reference environment (NKP): Velero **v1.18.0** (chart **12.0.0**), BSLs `default` (object store) +
+> `secondary-offsite` (MinIO/S3), schedules `velero-default` & `velero-secondary-manifests`.
 
 ---
 
@@ -140,25 +139,39 @@ kubectl -n "$NS" get schedule -o custom-columns='NAME:.metadata.name,CRON:.spec.
 **Security:** the credentials Secret is a **long-lived S3 credential** — restrict the bucket, `chmod 600`,
 never commit it; prefer short-lived/rotated keys where your S3 supports it.
 
-## 9. Lessons from a live validation (2026-09, MinIO on an NKP cluster)
+## 9. Knowledge base — how BSL configuration behaves on NKP
 
-Validated end-to-end on a real cluster: added a **new MinIO BSL** through the **override ConfigMap** →
-`Available` in **~20 s**, and a manifests-only `Backup` to it → **`Completed`** (0 errors).
+### Override precedence for *list* values
+The HelmRelease merges `valuesFrom` in order:
 
-Four things you only learn the hard way:
+```
+[ <app>-config-defaults ,  <configOverrides> (the workspace/UI field) ,  <app>-cluster-overrides ]
+```
 
-1. **The per-cluster override wins for *list* values.** The HelmRelease merges `valuesFrom` in order —
-   `[<app>-config-defaults, <configOverrides> (workspace/UI), <app>-cluster-overrides]` — and for a
-   **list** (`configuration.backupStorageLocation`) a later source **replaces** it. So if the
-   **per-cluster** CM (`<app>-cluster-overrides`) also defines the BSL list, your **workspace/UI** edit is
-   **shadowed** and nothing appears. → Put BSL changes in the **cluster override** (or keep both in sync).
-   (We edited the workspace CM first: no effect; the BSL appeared only after editing the cluster CM.)
-2. **Give every BSL its own bucket.** Velero validates the bucket **root** and rejects unexpected
-   top-level directories. Reusing a bucket with a `prefix` flipped the *other* BSL to
-   `Unavailable` → `Backup store contains invalid top-level directories: [...]`. One bucket per BSL.
-3. **MinIO speaks SigV4** — `curl -u user:pass` returns `400`; use the AWS SDK / `mc` / `aws` (and the
-   MinIO `mc` download URL has changed, `dl.min.io` no longer serves the raw binary).
-4. **`kubectl get backup` is ambiguous** (see §6) — always the fully-qualified `backups.velero.io`.
+For a **list** — e.g. `configuration.backupStorageLocation` — a later source **replaces** the earlier one
+(it does not merge element-by-element). **Consequence:** if the per-cluster ConfigMap
+(`<app>-cluster-overrides`) also defines the BSL list, the **workspace/UI override is shadowed** and an
+edit there appears to do nothing.
+→ Put BSL-list changes in the **cluster override**, or keep both ConfigMaps in sync.
+
+### One bucket per BSL
+Velero validates the bucket **root** and rejects unexpected top-level directories. Pointing a second BSL at
+an existing bucket with a `prefix` makes the *other* BSL go `Unavailable`
+(`Backup store contains invalid top-level directories: [...]`).
+→ give each BSL its **own bucket**.
+
+### What a healthy BSL looks like
+A correctly configured BSL reaches `Available` within seconds, and a manifests-only `Backup` to it
+completes with `0` errors and shows up under `kubectl get backups.velero.io`.
+
+### MinIO / S3-compatible endpoints
+MinIO speaks **SigV4** — `curl -u user:pass` returns `400`; use the AWS SDK / `mc` / `aws`. (The `mc`
+download URL from `dl.min.io` no longer serves the raw binary.)
+
+### Resource names
+`kubectl get backup` is **ambiguous** when both `backups.velero.io` and `backups.postgresql.cnpg.io`
+exist — always use fully-qualified names (`backups.velero.io`, `backupstoragelocations.velero.io`,
+`schedules.velero.io`), or the `velero` CLI inside the pod (`… exec deploy/velero -c velero -- /velero backup get`).
 
 ## 10. Reference
 - Your fuller playbook (nkp-deployer): `configure/velero/` — the automation script

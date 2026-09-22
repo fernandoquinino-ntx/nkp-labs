@@ -4,7 +4,7 @@ Give an external app / CI job a **kubeconfig** of its own, backed by a **Service
 **least-privilege** RBAC. Copy-paste procedure (no scripts required); the hands-on version is
 [lab 06](../06-long-lived-token-kubeconfig/).
 
-> Validated on Kubernetes **1.35** (Nutanix NKP), 2026-09-22.
+> Reference: Kubernetes **1.35** (Nutanix NKP).
 
 ## The three ways to authenticate an app
 
