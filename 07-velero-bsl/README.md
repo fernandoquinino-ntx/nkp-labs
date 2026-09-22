@@ -140,7 +140,27 @@ kubectl -n "$NS" get schedule -o custom-columns='NAME:.metadata.name,CRON:.spec.
 **Security:** the credentials Secret is a **long-lived S3 credential** — restrict the bucket, `chmod 600`,
 never commit it; prefer short-lived/rotated keys where your S3 supports it.
 
-## 9. Reference
+## 9. Lessons from a live validation (2026-09, MinIO on an NKP cluster)
+
+Validated end-to-end on a real cluster: added a **new MinIO BSL** through the **override ConfigMap** →
+`Available` in **~20 s**, and a manifests-only `Backup` to it → **`Completed`** (0 errors).
+
+Four things you only learn the hard way:
+
+1. **The per-cluster override wins for *list* values.** The HelmRelease merges `valuesFrom` in order —
+   `[<app>-config-defaults, <configOverrides> (workspace/UI), <app>-cluster-overrides]` — and for a
+   **list** (`configuration.backupStorageLocation`) a later source **replaces** it. So if the
+   **per-cluster** CM (`<app>-cluster-overrides`) also defines the BSL list, your **workspace/UI** edit is
+   **shadowed** and nothing appears. → Put BSL changes in the **cluster override** (or keep both in sync).
+   (We edited the workspace CM first: no effect; the BSL appeared only after editing the cluster CM.)
+2. **Give every BSL its own bucket.** Velero validates the bucket **root** and rejects unexpected
+   top-level directories. Reusing a bucket with a `prefix` flipped the *other* BSL to
+   `Unavailable` → `Backup store contains invalid top-level directories: [...]`. One bucket per BSL.
+3. **MinIO speaks SigV4** — `curl -u user:pass` returns `400`; use the AWS SDK / `mc` / `aws` (and the
+   MinIO `mc` download URL has changed, `dl.min.io` no longer serves the raw binary).
+4. **`kubectl get backup` is ambiguous** (see §6) — always the fully-qualified `backups.velero.io`.
+
+## 10. Reference
 - Your fuller playbook (nkp-deployer): `configure/velero/` — the automation script
   `configure-velero-secondary-bsl.sh`, `runbooks/velero-bsl.md`, `runbooks/nkp-cephfs-dr.md`.
 - Velero docs: <https://velero.io/docs/> (BSL: *Locations → Backup Storage Location*).
