@@ -6,7 +6,9 @@
 #   ./08-splunk-otel-helm/uninstall.sh --purge    # also delete the namespace
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "$HERE/../.." && pwd)"
+# Repo root = nearest ancestor containing scripts/render.sh (cwd/symlink independent).
+ROOT="$HERE"
+while [ ! -f "$ROOT/scripts/render.sh" ] && [ "$ROOT" != "/" ]; do ROOT="$(dirname "$ROOT")"; done
 [ -f "$ROOT/local.env" ] && { set -a; . "$ROOT/local.env"; set +a; } || true
 NS="${OTEL_NAMESPACE:-splunk-otel}"
 REL="${OTEL_RELEASE:-splunk-otel-collector}"

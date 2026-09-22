@@ -10,7 +10,7 @@
 #        BACKUP=0 NS=kommander ./verify.sh  # skip the smoke-test backup
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "$HERE/../.." && pwd)"
+ROOT="$(cd "$HERE/.." && pwd)"
 [ -f "$ROOT/local.env" ] && { set -a; . "$ROOT/local.env"; set +a; } || true
 NS="${NS:-${VELERO_NS:-kommander}}"
 command -v kubectl >/dev/null || { echo "kubectl not found" >&2; exit 1; }

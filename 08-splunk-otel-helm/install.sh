@@ -15,7 +15,11 @@
 # Requires: helm, kubectl. Config comes from ./local.env (copy local.env.example first).
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "$HERE/../.." && pwd)"
+# Repo root = the nearest ancestor containing scripts/render.sh. This works no matter
+# which directory you call the script from (and through symlinks).
+ROOT="$HERE"
+while [ ! -f "$ROOT/scripts/render.sh" ] && [ "$ROOT" != "/" ]; do ROOT="$(dirname "$ROOT")"; done
+[ -f "$ROOT/scripts/render.sh" ] || { echo "cannot locate the nkp-labs repo root (scripts/render.sh) upward from $HERE" >&2; exit 1; }
 LAB="$(basename "$HERE")"
 ENV_FILE="${ENV_FILE:-$ROOT/local.env}"
 
