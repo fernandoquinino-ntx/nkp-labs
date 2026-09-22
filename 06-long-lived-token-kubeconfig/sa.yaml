@@ -1,0 +1,36 @@
+# A dedicated ServiceAccount for an app / CI job + a LEAST-PRIVILEGE Role bound to it.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ${SA_NAME}
+  namespace: ${NAMESPACE}
+---
+# Example SCOPED permissions (this namespace only): read common objects.
+# Widen deliberately — either add rules here, or bind a built-in ClusterRole (`view`, `edit`, …)
+# with a RoleBinding (namespace-scoped) or ClusterRoleBinding (cluster-wide).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ${SA_NAME}
+  namespace: ${NAMESPACE}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "configmaps", "services", "secrets", "events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ${SA_NAME}
+  namespace: ${NAMESPACE}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ${SA_NAME}
+subjects:
+  - kind: ServiceAccount
+    name: ${SA_NAME}
+    namespace: ${NAMESPACE}

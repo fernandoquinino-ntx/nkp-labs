@@ -16,6 +16,7 @@ The manifests are **portable templates** (they use `${PLACEHOLDERS}`); you suppl
 | 03 | [03-apache-metallb](03-apache-metallb/) | expose a Service with `type: LoadBalancer` (an external IP, e.g. MetalLB) |
 | 04 | [04-apache-traefik-ingress](04-apache-traefik-ingress/) | route a **hostname → Service** through the cluster ingress controller |
 | 05 | [05-nkp-appdeployment](05-nkp-appdeployment/) | deploy an application the **NKP way** (`AppDeployment` + config overrides) |
+| 06 | [06-long-lived-token-kubeconfig](06-long-lived-token-kubeconfig/) | a **long-lived ServiceAccount token** + a ready **kubeconfig** for an app/CI (least privilege) |
 
 ## Quick start
 
@@ -58,6 +59,7 @@ Prefer the raw commands? `./scripts/render.sh <lab>` writes `rendered/<lab>/` an
 | `APP_HOST` | hostname label → `<APP_HOST>.<DOMAIN>` | `apache` |
 | `INGRESS_CLASS` | the cluster ingress class | `<your-ingress-class>` (NKP: `kommander-traefik`) |
 | `REPLICAS` | apache replicas (lab 02) | `3` |
+| `SA_NAME` | ServiceAccount name (lab 06) | `lab-app` |
 
 ## Layout
 

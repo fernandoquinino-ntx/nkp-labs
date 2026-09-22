@@ -15,7 +15,7 @@ TARGET="${1:-}"
 # shellcheck disable=SC1090
 set -a; . "$ENV_FILE"; set +a
 
-KEYS="NAMESPACE RWX_STORAGE_CLASS PVC_SIZE DOMAIN APP_HOST INGRESS_CLASS REPLICAS DNS_SERVER DNS_ZONE"
+KEYS="NAMESPACE RWX_STORAGE_CLASS PVC_SIZE DOMAIN APP_HOST INGRESS_CLASS REPLICAS SA_NAME DNS_SERVER DNS_ZONE"
 
 rm -rf "$OUT"; mkdir -p "$OUT"
 if [ "$TARGET" = "all" ]; then mapfile -t LABS < <(cd "$ROOT" && ls -d [0-9][0-9]-*/ 2>/dev/null); else mapfile -t LABS < <(echo "${TARGET%/}/"); fi
