@@ -6,6 +6,9 @@ metadata:
   name: apache
   namespace: ${NAMESPACE}
 spec:
+  # `ingressClassName` is OPTIONAL when an ingress class is marked as the cluster DEFAULT
+  # (here `kommander-traefik` is the default — see `kubectl get ingressclass` / the
+  #  `ingressclass.kubernetes.io/is-default-class` annotation). Set it to be explicit.
   ingressClassName: ${INGRESS_CLASS}      # e.g. kommander-traefik (NKP), nginx
   rules:
     - host: ${APP_HOST}.${DOMAIN}         # e.g. apache.apps.example.com (must resolve to the ingress LB)
