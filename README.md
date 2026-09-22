@@ -18,6 +18,7 @@ The manifests are **portable templates** (they use `${PLACEHOLDERS}`); you suppl
 | 05 | [05-nkp-appdeployment](05-nkp-appdeployment/) | deploy an application the **NKP way** (`AppDeployment` + config overrides) |
 | 06 | [06-long-lived-token-kubeconfig](06-long-lived-token-kubeconfig/) | a **long-lived ServiceAccount token** + a ready **kubeconfig** for an app/CI (least privilege) |
 | 07 | [07-velero-bsl](07-velero-bsl/) | configure a **Velero Backup Storage Location (BSL)** — from the **UI** (AppDeployment overrides) and the **CLI**, plus the Velero/NKP **CRDs** |
+| 08 | [08-splunk-otel-helm](08-splunk-otel-helm/) | install the **Splunk OpenTelemetry Collector** with **plain `helm`** (no catalog) — every setting explained, **logs + metrics** to Splunk over HEC, and **troubleshooting** |
 
 ## Procedures (step-by-step, copy-paste)
 
@@ -49,11 +50,14 @@ Prefer the raw commands? `./scripts/render.sh <lab>` writes `rendered/<lab>/` an
 ## Requirements
 
 - `kubectl` pointing at your cluster.
+- `helm` (v3) for **lab 08** (the Splunk OTel Collector chart).
 - **A ReadWriteMany StorageClass** (lab 01/02 need it) — e.g. Nutanix **NUS** `nus-files`, CephFS, NFS,
   Amazon EFS…
 - (lab 03) a **LoadBalancer** implementation — e.g. **MetalLB**.
 - (lab 04) an **ingress controller** (Traefik/nginx) **+ a DNS name** for the app host; for HTTPS, a TLS
   cert — the cluster's **default cert** or your own Secret.
+- (lab 08) a **Splunk HEC endpoint + token**, and the two indexes the token allows; the cluster nodes
+  must reach the endpoint on `:8088`.
 
 ## Placeholders (`local.env`)
 
@@ -68,6 +72,11 @@ Prefer the raw commands? `./scripts/render.sh <lab>` writes `rendered/<lab>/` an
 | `REPLICAS` | apache replicas (lab 02) | `3` |
 | `SA_NAME` | ServiceAccount name (lab 06) | `lab-app` |
 | `VELERO_NS` | namespace where Velero runs (lab 07) | `kommander` |
+| `OTEL_NAMESPACE` / `OTEL_RELEASE` / `CHART_VERSION` | collector namespace / Helm release / chart version (lab 08) | `splunk-otel` / `splunk-otel-collector` / `0.160.0` |
+| `SPLUNK_CLUSTER_NAME` | `k8s.cluster.name` — unique per cluster (lab 08) | `dc1-nkp-cl01` |
+| `SPLUNK_HEC_ENDPOINT` | Splunk HEC URL (lab 08) | `https://<stack>.splunkcloud.com:8088/services/collector/event` |
+| `SPLUNK_HEC_TOKEN` | **secret** HEC token (lab 08) — gitignored only | `<uuid>` |
+| `SPLUNK_INDEX` / `SPLUNK_METRICS_INDEX` | events / metrics indexes, both **token-allowed** (lab 08) | `k8s_logs` / `k8s_metrics` |
 
 ## Layout
 

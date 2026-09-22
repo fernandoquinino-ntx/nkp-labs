@@ -1,0 +1,275 @@
+# Lab 08 — Install the Splunk OpenTelemetry Collector with Helm (no catalog)
+
+**Learn:** deploy Splunk's OpenTelemetry Collector chart with **plain `helm`** (no NKP catalog, no
+`AppDeployment`), understand **what every setting does and why**, ship **logs *and* metrics** from a
+cluster to Splunk over **HEC**, verify it, and **troubleshoot** it when it breaks.
+
+> Validated against chart **`splunk-otel-collector` 0.160.0** on an NKP cluster (management +
+> managed), sending to Splunk Cloud. The whole point of this lab is the **annotated**
+> [`values.example.yaml`](values.example.yaml) — read it line by line.
+
+---
+
+## 0. What you will build
+
+One Helm release installs **two** workloads:
+
+```
+                        your cluster
+  ┌───────────────────────────────────────────────────────────────┐
+  │ DaemonSet  <release>-agent            (one pod per node)       │
+  │   reads NODE-LOCAL sources:                                    │
+  │     • /var/log/pods/*            → container logs              │
+  │     • the systemd journal        → host logs (+ kernel)        │──┐
+  │     • /var/log/kubernetes/audit  → kube-apiserver audit        │  │
+  │     • /proc,/sys (host)          → host metrics                │  │
+  │     • kubelet :10250             → pod/container metrics       │  │
+  ├───────────────────────────────────────────────────────────────┤  │  HEC
+  │ Deployment <release>-k8s-cluster-receiver (one pod per cluster)│  ├──► Splunk
+  │     • the Kubernetes API          → cluster metrics + events   │  │  index k8s_logs
+  └───────────────────────────────────────────────────────────────┘  │  index k8s_metrics
+                                                                      │
+  Splunk Cloud  https://<stack>.splunkcloud.com:8088/services/collector/event
+```
+
+Nothing here touches Loki or NKP's Fluent Bits — the collector reads the **same node sources** in
+parallel (“dual-ship”).
+
+---
+
+## 1. Concepts in 2 minutes (if you have never used Splunk)
+
+| Term | What it is |
+|---|---|
+| **HEC** | *HTTP Event Collector* — Splunk's HTTPS ingest API, `https://<stack>.splunkcloud.com:8088/services/collector/event` |
+| **HEC token** | a UUID credential sent in the header `Authorization: Splunk <token>` (not your login) |
+| **Index** | the bucket data lands in. Two **types**: **events** (logs) and **metrics** (numbers). Metrics *cannot* go into an events index → that is why we use two indexes |
+| **Selected Allowed Indexes** | a per-token allow-list. Sending to any other index returns `HTTP 400 {"text":"Incorrect index"}` and the collector **silently drops the data**. ⚠ the #1 failure in this lab |
+| **SPL** | Splunk's search language, used in the web UI |
+| **ACS** | Splunk Cloud's config REST API (`admin.splunk.com`) — optional; may be blocked by IP allow-list, then use the UI |
+
+**TLS gotcha:** the Splunk Cloud HEC endpoint serves `CN=SplunkServerDefaultCert` (issuer
+`SplunkCommonCA`), which is **not publicly trusted** → we must set `insecureSkipVerify: true` (or, in
+production, install the Splunk CA).
+
+**Splunk Cloud gotcha:** the management REST port `:8089` is **closed** → you verify with the **web
+UI**, not with a script.
+
+---
+
+## 2. Files
+
+| File | What |
+|---|---|
+| [`values.example.yaml`](values.example.yaml) | **the star** — annotated Helm values (every key has a `# WHY:`) |
+| [`namespace.yaml`](namespace.yaml) | the namespace (`${OTEL_NAMESPACE}`) so `scripts/apply.sh`/`cleanup.sh` work |
+| [`install.sh`](install.sh) | render → `helm repo add` → `helm upgrade --install` (`--dry-run`, `--apply`, `--template`) |
+| [`verify.sh`](verify.sh) | end-to-end check: pods, drops, **per-receiver counters**, HEC probe, SPL |
+| [`uninstall.sh`](uninstall.sh) | remove the release (and optionally the namespace) |
+
+---
+
+## 3. Prerequisites
+
+**Tools:** `kubectl`, `helm` (v3). `curl` for the HEC probe. Your machine must reach the cluster; the
+**cluster nodes** must reach your Splunk HEC endpoint (outbound `:8088`).
+
+**Splunk side** (do this first — the collector is useless without it):
+
+1. Create the indexes in the Splunk UI:
+   **Settings → Indexes → New Index** → `k8s_logs` (*Events*) and `k8s_metrics` (*Metrics*).
+2. Allow them on the HEC token:
+   **Settings → Data inputs → HTTP Event Collector → (your token) → Edit →
+   Selected Allowed Indexes → add `k8s_logs` and `k8s_metrics` → Save.**
+3. Prove it from your machine:
+   ```bash
+   TOKEN=<your-hec-token>
+   URL=https://<stack>.splunkcloud.com:8088/services/collector/event
+   curl -sk -H "Authorization: Splunk $TOKEN" -d '{"event":"x","index":"k8s_logs"}'    "$URL"
+   curl -sk -H "Authorization: Splunk $TOKEN" -d '{"event":"m","index":"k8s_metrics"}' "$URL"
+   # both must print {"text":"Success","code":0}
+   # {"text":"Incorrect index"} => step 2 is not done (or the index name is wrong)
+   ```
+   (`-k` is required here — see the TLS gotcha above.)
+
+---
+
+## 4. Step 1 — configure and render
+
+```bash
+cp local.env.example local.env      # gitignored
+$EDITOR local.env                   # set the OTEL_* and SPLUNK_* values
+./scripts/render.sh 08-splunk-otel-helm
+ls rendered/08-splunk-otel-helm/    # namespace.yaml + values.example.yaml (with YOUR values substituted)
+```
+
+The variables this lab uses:
+
+| Variable | Example | Notes |
+|---|---|---|
+| `OTEL_NAMESPACE` | `splunk-otel` | where the collector runs |
+| `OTEL_RELEASE` | `splunk-otel-collector` | the Helm release name |
+| `CHART_VERSION` | `0.160.0` | **pin** the chart version |
+| `SPLUNK_CLUSTER_NAME` | `dc1-nkp-cl01` | becomes `k8s.cluster.name`; **must be unique per cluster** |
+| `SPLUNK_HEC_ENDPOINT` | `https://prd-p-xxxxx.splunkcloud.com:8088/services/collector/event` | the HEC URL |
+| `SPLUNK_HEC_TOKEN` | `<hec-token>` | **secret** — lives only in `local.env` (gitignored) |
+| `SPLUNK_INDEX` | `k8s_logs` | events index — **must be token-allowed** |
+| `SPLUNK_METRICS_INDEX` | `k8s_metrics` | metrics index — **must be token-allowed** |
+
+---
+
+## 5. Step 2 — the settings **and why** (the point of this lab)
+
+Open [`values.example.yaml`](values.example.yaml). Every block has a `# WHY:`. Summary:
+
+| Setting | Value you set | **Why it exists / what breaks without it** |
+|---|---|---|
+| `clusterName` | your cluster name | Attached as `k8s.cluster.name` to every record → filter per cluster. Also **required non-empty** by the chart schema. Two clusters with the same name look like one stream. |
+| `splunkPlatform.endpoint` | the HEC URL | Where data is sent (`:8088/services/collector/event`). |
+| `splunkPlatform.token` | the HEC token | Authenticates to HEC. The chart **creates a Secret** from it and injects it as an env var. Keep it out of git. |
+| `splunkPlatform.index` | `k8s_logs` | The events index for logs. **Must be token-allowed and non-empty** — else `400 Incorrect index` and a **silent drop**. |
+| `splunkPlatform.metricsEnabled` + `metricsIndex` | `true` + `k8s_metrics` | Metrics need a **metrics-type** index; `metricsIndex` is required when metrics are on. |
+| `splunkPlatform.insecureSkipVerify` | `true` | The Cloud HEC cert (`SplunkCommonCA`) is not publicly trusted → strict TLS fails everywhere. |
+| `logsCollection.containers.enabled` | `true` | Container stdout/stderr (`/var/log/pods/*`). |
+| `logsCollection.journald.units` | `[]` (empty) | The chart builds **one journald receiver per listed unit** — there is **no “all units”** option, so a short list silently misses host services. Empty + the custom `journald/all` receiver = full host parity. |
+| — `agent.config.receivers.journald/all` | no `units` | One receiver, **no filter** = the **whole** journal (all units **and** kernel entries). |
+| `logsCollection.extraFileLogs.file_log/nkp-audit` | audit path | kube-apiserver audit files. The map **key is the receiver name** and the chart renamed `filelog`→`file_log`, so it must be `file_log/...`. |
+| `agent.extraVolumes/Mounts` | `/var/log/kubernetes/audit` | Workers have no audit dir — `DirectoryOrCreate` avoids crashes. |
+| `agent.config.receivers.kubelet_stats.insecure_skip_verify` | `true` | The kubelet cert (`:10250`) has **no IP SAN** → kubelet metrics return **0 points with no drops**. This is the sneakiest failure. |
+| `agent.config.service.pipelines.logs/host.receivers` | `[file_log/nkp-audit, journald/all]` | Lists are **replaced**, not merged — wiring the catch-all receiver means re-listing the audit one. |
+| `clusterReceiver.enabled` | `true` | One **Deployment** per cluster reading the Kubernetes API (cluster metrics + Events). Needed for cluster-wide metrics/events. |
+| `agent.resources`, `clusterReceiver.resources` | small | Right-size the per-node agent and the single cluster receiver. |
+
+Why **DaemonSet + Deployment**? The agent reads **node-local** data (needs one pod per node); the
+cluster receiver reads the **Kubernetes API** (needs exactly one pod per cluster). If you lose one,
+you lose exactly that data subset.
+
+---
+
+## 6. Step 3 — install
+
+```bash
+# preview (renders the chart, changes nothing)
+./08-splunk-otel-helm/install.sh
+
+# install / upgrade
+./08-splunk-otel-helm/install.sh --apply
+```
+
+Under the hood `install.sh` runs the equivalent of:
+
+```bash
+helm repo add splunk-otel-collector-chart https://signalfx.github.io/splunk-otel-collector-chart
+helm repo update
+helm -n "$OTEL_NAMESPACE" upgrade --install "$OTEL_RELEASE" \
+  splunk-otel-collector-chart/splunk-otel-collector \
+  --version "$CHART_VERSION" --create-namespace \
+  -f rendered/08-splunk-otel-helm/values.example.yaml
+```
+
+**No Helm release state?** use the GitOps-style path (renders with Helm, applies with kubectl):
+
+```bash
+./08-splunk-otel-helm/install.sh --template      # helm template | kubectl apply -f -
+```
+
+> `helm template` also lets you **inspect** exactly what the chart generates — e.g.
+> `helm template ... --show-only templates/configmap-agent.yaml`.
+
+---
+
+## 7. Step 4 — verify
+
+```bash
+./08-splunk-otel-helm/verify.sh
+```
+
+It checks the release/pods, greps for **`Dropping data`**, prints the collector's **per-receiver
+counters**, probes HEC for both indexes with your token, and prints the SPL to run.
+
+Manual equivalent:
+
+```bash
+kubectl -n splunk-otel get ds,deploy,pods
+kubectl -n splunk-otel logs -l app=splunk-otel-collector --tail=2000 | grep -c 'Dropping data'   # 0
+
+# THE counter check (the app must accept records/points and fail to send nothing)
+P=$(kubectl -n splunk-otel get pod -l app=splunk-otel-collector -o jsonpath='{.items[0].metadata.name}')
+kubectl -n splunk-otel port-forward pod/$P 18889:8889 &
+curl -s localhost:18889/metrics | grep -E 'accepted_log_records|accepted_metric_points|send_failed' | grep -v '^#'
+```
+
+Then in the **Splunk UI**:
+
+```
+index=k8s_logs earliest=-15m | stats count by k8s.cluster.name
+index=k8s_logs sourcetype=kube:journald:* earliest=-15m | head 20
+index=k8s_logs sourcetype=kube:kernel   earliest=-15m | head 20
+| mcatalog values(metric_name) WHERE index=k8s_metrics
+| mstats avg(_value) WHERE index=k8s_metrics metric_name="k8s.node.condition_ready" span=1m
+```
+
+---
+
+## 8. Step 5 — troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Pods `Ready`, but nothing in Splunk | index not on the token's allowed list | add it (Step 3.2); the collector **silently drops** |
+| `HTTP 400 "Incorrect index"` in the logs | same as above (or wrong index name) | fix the token / `splunkPlatform.index` |
+| `HTTP 403 "Forbidden"` | wrong/rotated token in the running pod | fix the token, then `kubectl -n splunk-otel rollout restart ds/<release>-agent` |
+| `x509: certificate signed by unknown authority` | Splunk HEC cert is `SplunkCommonCA` | `splunkPlatform.insecureSkipVerify: true` |
+| `kubelet_stats` accepted **0**, but logs and other metrics are fine, **no** `Dropping data` | kubelet cert has **no IP SAN** | `agent.config.receivers.kubelet_stats.insecure_skip_verify: true` |
+| `helm upgrade` error `minLength: got 0, want 1` | empty `splunkPlatform.index` | always set a real index (the schema has no “omit index” mode) |
+| `no matches for kind` / chart not found | repo not added/updated | `helm repo add … && helm repo update`; check `--version` |
+| `helm` says release exists but nothing runs | wrong namespace / release name | `helm -n <ns> list -a`; use the same `-n`/release as install |
+| Managed cluster never updates (if you later wrap this in an AppDeployment) | Kommander snapshots the override ConfigMap | bump the AppDeployment spec — see the nkp-deployer guide |
+
+**The golden rule:** **“no drops” does not mean “working”.** A receiver that fails to *scrape*
+(kubelet, a missing log path, a bad index name on one pipeline) produces **nothing** and drops
+**nothing**. Always pair the drop check with the **per-receiver counters** in Step 4.
+
+Detailed diagnostics:
+
+```bash
+# what is the collector actually complaining about?
+kubectl -n splunk-otel logs -l app=splunk-otel-collector --tail=300 | grep -iE 'error|drop|x509|index'
+# the kubelet trap, specifically:
+kubectl -n splunk-otel logs -l app=splunk-otel-collector | grep -i 'IP SAN'
+# what did we send to the cluster?
+helm -n splunk-otel get values "$OTEL_RELEASE" | grep -vE 'token'      # effective values (token hidden)
+kubectl -n splunk-otel get cm <release>-otel-agent -o jsonpath='{.data.relay}' | head -60
+```
+
+---
+
+## 9. Step 6 — day-2
+
+```bash
+# change the index/endpoint/values: edit local.env, re-render, re-apply
+./08-splunk-otel-helm/install.sh --apply
+
+# change the token (the chart re-creates its Secret; pods must restart to pick up the env var)
+kubectl -n splunk-otel rollout restart ds/"$OTEL_RELEASE"-agent
+
+# enable/disable metrics: set splunkPlatform.metricsEnabled + clusterReceiver.enabled, re-apply
+# upgrade the chart: set a new CHART_VERSION, re-run install.sh --apply
+```
+
+## 10. Cleanup
+
+```bash
+./08-splunk-otel-helm/uninstall.sh            # remove the Helm release
+./08-splunk-otel-helm/uninstall.sh --purge    # ... and delete the namespace
+./scripts/cleanup.sh 08-splunk-otel-helm      # remove the namespace manifest (if applied)
+```
+
+---
+
+## 11. Reference
+
+- The chart: <https://github.com/signalfx/splunk-otel-collector-chart> ·
+  <https://signalfx.github.io/splunk-otel-collector-chart>
+- Full playbook + deep troubleshooting (same config, plus the NKP catalog path):
+  `nkp-deployer/configure/splunk/GUIDE.md`, `runbooks/splunk-otel.md`, `runbooks/metrics.md`.
+- Splunk HEC docs: *Getting data in → HTTP Event Collector*.
