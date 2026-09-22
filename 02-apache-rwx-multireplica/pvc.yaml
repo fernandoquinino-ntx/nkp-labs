@@ -1,0 +1,13 @@
+# The web content volume — shared by ALL apache replicas (they must serve the SAME html).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: lab-web
+  namespace: ${NAMESPACE}
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: ${RWX_STORAGE_CLASS}
+  resources:
+    requests:
+      storage: ${PVC_SIZE}

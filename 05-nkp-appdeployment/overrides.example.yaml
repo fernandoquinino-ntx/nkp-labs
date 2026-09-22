@@ -1,0 +1,24 @@
+# Config override for the AppDeployment — the ConfigMap the NKP UI reads/writes.
+#
+# COPY -> overrides.yaml ; edit ; apply BEFORE the AppDeployment:
+#   kubectl -n <workspace-ns> apply -f overrides.yaml
+#
+# It holds `values.yaml` (Helm values) which the controller MERGES over the app defaults (later wins):
+#   HelmRelease.spec.valuesFrom = [ <app>-config-defaults, <this CM>, <app>-cluster-overrides ]
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: <deployment-name>-overrides       # EDIT-ME  (must match spec.configOverrides.name)
+  namespace: <workspace-namespace>        # EDIT-ME  e.g. kommander
+data:
+  values.yaml: |
+    # EDIT-ME: Helm values for the app. Examples (shown generically):
+    replicaCount: 2
+    resources:
+      requests: { cpu: 100m, memory: 128Mi }
+    ingress:
+      enabled: true
+      className: <ingress-class>          # e.g. kommander-traefik
+      hosts:
+        - host: <app>.<domain>            # e.g. podinfo.apps.example.com
+          paths: ["/"]

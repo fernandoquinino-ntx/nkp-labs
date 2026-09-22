@@ -1,0 +1,14 @@
+# ClusterIP Service — the Ingress routes to this.
+apiVersion: v1
+kind: Service
+metadata:
+  name: apache
+  namespace: ${NAMESPACE}
+  labels: { app: apache }
+spec:
+  type: ClusterIP
+  selector: { app: apache }
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80

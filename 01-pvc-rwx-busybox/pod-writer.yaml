@@ -1,0 +1,22 @@
+# One pod that WRITES to the shared RWX volume.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: rwx-writer
+  namespace: ${NAMESPACE}
+  labels: { app: rwx-demo, role: writer }
+spec:
+  containers:
+    - name: writer
+      image: busybox:1.36
+      command:
+        - sh
+        - -c
+        - 'while true; do echo "$(date) - written by $(hostname)" >> /data/hello.txt; sleep 5; done'
+      volumeMounts:
+        - name: data
+          mountPath: /data
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: lab-rwx

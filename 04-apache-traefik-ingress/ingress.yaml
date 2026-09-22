@@ -1,0 +1,26 @@
+# Route a HOSTNAME to the apache Service through the cluster's ingress controller.
+# The app is served at http(s)://${APP_HOST}.${DOMAIN}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: apache
+  namespace: ${NAMESPACE}
+spec:
+  ingressClassName: ${INGRESS_CLASS}      # e.g. kommander-traefik (NKP), nginx
+  rules:
+    - host: ${APP_HOST}.${DOMAIN}         # e.g. apache.apps.example.com (must resolve to the ingress LB)
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: apache
+                port:
+                  number: 80
+  # ---- HTTPS ----
+  # Omit `tls:` entirely to use the ingress controller's DEFAULT certificate.
+  # Or reference your own Secret (must be `kubernetes.io/tls` and in THIS namespace):
+  # tls:
+  #   - hosts: ["${APP_HOST}.${DOMAIN}"]
+  #     secretName: apache-tls

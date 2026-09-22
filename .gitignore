@@ -1,0 +1,8 @@
+# your real values + generated output — never commit
+local.env
+rendered/
+
+# os / editor
+.DS_Store
+.idea/
+.vscode/

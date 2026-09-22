@@ -1,0 +1,45 @@
+# Apache serving a page from a SHARED ReadWriteMany volume, with N replicas.
+# TWO CONTAINERS IN THE SAME POD mount the SAME volume:
+#   - `page-writer` (busybox) regenerates /web/index.html
+#   - `apache` (httpd) serves that directory as the web root
+# Because every replica mounts the same PVC, all replicas serve the same, live-updated page.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apache
+  namespace: ${NAMESPACE}
+  labels: { app: apache }
+spec:
+  replicas: ${REPLICAS}
+  selector:
+    matchLabels: { app: apache }
+  template:
+    metadata:
+      labels: { app: apache }
+    spec:
+      containers:
+        - name: apache
+          image: httpd:2.4
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: web
+              mountPath: /usr/local/apache2/htdocs      # the document root
+        - name: page-writer                             # 2nd container, SAME pod, SAME volume
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - >
+              while true; do
+                printf '<html><body><h1>Hello from %s</h1><p>updated %s</p></body></html>\n'
+                  "$(hostname)" "$(date)" > /web/index.html;
+                sleep 10;
+              done
+          volumeMounts:
+            - name: web
+              mountPath: /web
+      volumes:
+        - name: web
+          persistentVolumeClaim:
+            claimName: lab-web

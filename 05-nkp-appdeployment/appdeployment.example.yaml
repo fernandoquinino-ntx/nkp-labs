@@ -1,0 +1,40 @@
+# AppDeployment — deploy an application the NKP way (declarative).
+#
+# COPY -> appdeployment.yaml ; set the EDIT-ME values ; apply the WHOLE file:
+#   kubectl -n <workspace-ns> apply --server-side -f appdeployment.yaml
+#
+# `appRef` can point at:
+#   - kind: App        -> an application from a CATALOG (NKP catalog collection), e.g. `<app>-<version>`
+#   - kind: ClusterApp -> a PLATFORM/built-in application (e.g. centralized-grafana)
+# List what's available:   kubectl -n <workspace-ns> get apps | grep <name>
+#
+# The optional `configOverrides` ConfigMap is the field the NKP/Kommander UI reads & writes, so your
+# customisation shows up on the app's page (see overrides.example.yaml).
+apiVersion: apps.kommander.d2iq.io/v1alpha3
+kind: AppDeployment
+metadata:
+  name: <deployment-name>                 # EDIT-ME  e.g. podinfo
+  namespace: <workspace-namespace>        # EDIT-ME  workspace ns (e.g. kommander / <project-ns>)
+spec:
+  appRef:
+    kind: App                             # EDIT-ME  App (catalog) | ClusterApp (platform)
+    name: <app-id>-<version>              # EDIT-ME  e.g. podinfo-6.7.1  (kubectl get apps | grep podinfo)
+  clusterSelector:
+    matchExpressions:
+      - key: kommander.d2iq.io/cluster-name
+        operator: In
+        values:
+          - "<cluster-name>"              # EDIT-ME  e.g. ds-cluster01
+  # Workspace-wide override (ALL clusters) — the UI-visible field. Remove if no overrides.
+  configOverrides:
+    name: <deployment-name>-overrides     # EDIT-ME  (create the CM FIRST)
+  # Per-cluster override (optional).
+  clusterConfigOverrides:
+    - appVersion: "<version>"             # EDIT-ME  e.g. 6.7.1
+      clusterSelector:
+        matchExpressions:
+          - key: kommander.d2iq.io/cluster-name
+            operator: In
+            values:
+              - "<cluster-name>"          # EDIT-ME
+      configMapName: <deployment-name>-overrides

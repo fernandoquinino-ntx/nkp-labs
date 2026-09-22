@@ -1,0 +1,22 @@
+# One pod that READS the shared RWX volume (tails the same file the writer appends to).
+apiVersion: v1
+kind: Pod
+metadata:
+  name: rwx-reader
+  namespace: ${NAMESPACE}
+  labels: { app: rwx-demo, role: reader }
+spec:
+  containers:
+    - name: reader
+      image: busybox:1.36
+      command:
+        - sh
+        - -c
+        - 'touch /data/hello.txt; tail -f /data/hello.txt'
+      volumeMounts:
+        - name: data
+          mountPath: /data
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: lab-rwx

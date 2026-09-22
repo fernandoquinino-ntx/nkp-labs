@@ -1,0 +1,14 @@
+# A ReadWriteMany PVC — the SAME volume is mounted by several pods.
+# Requires a StorageClass that supports RWX (e.g. Nutanix NUS `nus-files`, CephFS, NFS, EFS).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: lab-rwx
+  namespace: ${NAMESPACE}
+spec:
+  accessModes:
+    - ReadWriteMany          # <-- many pods, possibly on many nodes
+  storageClassName: ${RWX_STORAGE_CLASS}
+  resources:
+    requests:
+      storage: ${PVC_SIZE}

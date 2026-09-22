@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# render.sh <lab-dir|all> — substitute ${PLACEHOLDERS} from local.env into rendered/<lab>/.
+set -euo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$HERE/.." && pwd)"
+ENV_FILE="${ENV_FILE:-$ROOT/local.env}"
+OUT="$ROOT/rendered"
+
+[ -f "$ENV_FILE" ] || { echo "missing $ENV_FILE — copy local.env.example to local.env and edit it" >&2; exit 1; }
+
+TARGET="${1:-}"
+[ -n "$TARGET" ] || { echo "usage: $0 <lab-dir|all>   e.g. $0 01-pvc-rwx-busybox" >&2; exit 1; }
+
+# shellcheck disable=SC1090
+set -a; . "$ENV_FILE"; set +a
+
+KEYS="NAMESPACE RWX_STORAGE_CLASS PVC_SIZE DOMAIN APP_HOST INGRESS_CLASS REPLICAS DNS_SERVER DNS_ZONE"
+
+rm -rf "$OUT"; mkdir -p "$OUT"
+if [ "$TARGET" = "all" ]; then mapfile -t LABS < <(cd "$ROOT" && ls -d [0-9][0-9]-*/ 2>/dev/null); else mapfile -t LABS < <(echo "${TARGET%/}/"); fi
+
+for d in "${LABS[@]}"; do
+  src="$ROOT/${d%/}"; [ -d "$src" ] || { echo "no such lab: $src" >&2; exit 1; }
+  lab="$(basename "$src")"; mkdir -p "$OUT/$lab"
+  shopt -s nullglob
+  for f in "$src"/*.yaml; do
+    out="$OUT/$lab/$(basename "$f")"; cp "$f" "$out"
+    for key in $KEYS; do
+      val="${!key:-}"; [ -n "$val" ] || continue
+      sed -i "s|\${${key}}|${val}|g" "$out"
+    done
+  done
+  shopt -u nullglob
+done
+echo "rendered -> $OUT"

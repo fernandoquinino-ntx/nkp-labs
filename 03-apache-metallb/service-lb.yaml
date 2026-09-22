@@ -1,0 +1,17 @@
+# Expose Apache OUTSIDE the cluster with a LoadBalancer IP (MetalLB in a bare-metal lab).
+apiVersion: v1
+kind: Service
+metadata:
+  name: apache-lb
+  namespace: ${NAMESPACE}
+  labels: { app: apache }
+  # OPTIONAL — request a specific address from your MetalLB pool:
+  # annotations:
+  #   metallb.io/loadBalancerIPs: 10.0.0.50
+spec:
+  type: LoadBalancer            # <-- ask the cloud/LB controller (MetalLB) for an external IP
+  selector: { app: apache }
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
