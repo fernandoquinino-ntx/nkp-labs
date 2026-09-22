@@ -16,9 +16,11 @@ command -v kubectl >/dev/null || { echo "kubectl not found" >&2; exit 1; }
 NS="$( . "$ROOT/local.env"; echo "${NAMESPACE:-default}" )"
 
 shopt -s nullglob
-files=("$ROOT/rendered/$LAB"/*.yaml)          # top-level only (skip subdirs)
+all=("$ROOT/rendered/$LAB"/*.yaml)            # top-level only (skip subdirs)
 shopt -u nullglob
-[ "${#files[@]}" -gt 0 ] || { echo "no manifests in rendered/$LAB/" >&2; exit 1; }
+files=()
+for f in "${all[@]}"; do case "$f" in *.example.yaml) ;; *) files+=("$f") ;; esac; done  # skip *.example.yaml templates
+[ "${#files[@]}" -gt 0 ] || { echo "no applicable manifests in rendered/$LAB/ (only *.example.yaml?)" >&2; exit 1; }
 
 # Concatenate to a real temp file, with `---` BETWEEN files (a plain `cat f1 f2` would merge the
 # last doc of one file with the first of the next, and kubectl would silently drop them).

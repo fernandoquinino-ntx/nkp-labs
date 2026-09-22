@@ -1,0 +1,28 @@
+# A raw BackupStorageLocation CR (velero.io/v1) — what the Helm values ultimately create.
+#
+# Useful to UNDERSTAND a BSL, or for a Velero install you manage yourself.
+#
+# NOTE (NKP): the AppDeployment / Helm values are the source of truth — NKP runs a
+# `velero-backup-storage-location-updater` and a reconcile can overwrite a hand-made CR. So on NKP
+# prefer Path A/B (the override ConfigMap). Keep this for reference.
+apiVersion: velero.io/v1
+kind: BackupStorageLocation
+metadata:
+  name: secondary-offsite
+  namespace: ${VELERO_NS}
+spec:
+  provider: aws
+  objectStorage:
+    bucket: <YOUR_BUCKET>          # EDIT-ME
+    prefix: ""                     # optional sub-prefix inside the bucket
+  default: false
+  config:
+    profile: "secondary"           # must exist in the credentials `cloud` file
+    region: <YOUR_REGION>          # EDIT-ME (us-east-1 for MinIO / Nutanix Objects)
+    s3ForcePathStyle: "true"       # true for MinIO / Objects / generic S3
+    s3Url: https://s3.example.com  # EDIT-ME (omit for AWS S3)
+  # Point at the credentials Secret explicitly (optional — the chart also injects it):
+  # credential:
+  #   name: velero-offsite-credentials
+  #   key: cloud
+  accessMode: ReadWrite

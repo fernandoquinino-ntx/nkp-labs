@@ -1,0 +1,17 @@
+# A raw Schedule CR (velero.io/v1) — periodic backups.
+#
+# The `schedules:` block in the Velero Helm values creates these for you (NKP names them
+# `velero-<key>`); use this if you manage Velero yourself or want an extra schedule.
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: daily-manifests
+  namespace: ${VELERO_NS}
+spec:
+  schedule: "0 2 * * *"            # cron (UTC)
+  template:
+    ttl: 720h                      # keep backups 30 days
+    storageLocation: secondary-offsite
+    snapshotVolumes: false         # manifests-only (no volume snapshots)
+    includedNamespaces: ["*"]
+    includeClusterResources: true

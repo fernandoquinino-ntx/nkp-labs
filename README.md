@@ -17,6 +17,7 @@ The manifests are **portable templates** (they use `${PLACEHOLDERS}`); you suppl
 | 04 | [04-apache-traefik-ingress](04-apache-traefik-ingress/) | route a **hostname → Service** through the cluster ingress controller |
 | 05 | [05-nkp-appdeployment](05-nkp-appdeployment/) | deploy an application the **NKP way** (`AppDeployment` + config overrides) |
 | 06 | [06-long-lived-token-kubeconfig](06-long-lived-token-kubeconfig/) | a **long-lived ServiceAccount token** + a ready **kubeconfig** for an app/CI (least privilege) |
+| 07 | [07-velero-bsl](07-velero-bsl/) | configure a **Velero Backup Storage Location (BSL)** — from the **UI** (AppDeployment overrides) and the **CLI**, plus the Velero/NKP **CRDs** |
 
 ## Procedures (step-by-step, copy-paste)
 
@@ -66,6 +67,7 @@ Prefer the raw commands? `./scripts/render.sh <lab>` writes `rendered/<lab>/` an
 | `INGRESS_CLASS` | the cluster ingress class | `<your-ingress-class>` (NKP: `kommander-traefik`) |
 | `REPLICAS` | apache replicas (lab 02) | `3` |
 | `SA_NAME` | ServiceAccount name (lab 06) | `lab-app` |
+| `VELERO_NS` | namespace where Velero runs (lab 07) | `kommander` |
 
 ## Layout
 

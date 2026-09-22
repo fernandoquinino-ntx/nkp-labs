@@ -1,0 +1,57 @@
+# velero-overrides.example.yaml — the ConfigMap the Kommander UI reads/writes for the Velero app.
+#
+# COPY -> velero-overrides.yaml ; edit the bucket / region / s3Url / credentials-secret name ;
+# apply BEFORE the AppDeployment.  This is the *declarative* way to add a Backup Storage Location
+# (BSL): the AppDeployment references this ConfigMap via spec.configOverrides.name.
+#
+# The Velero Helm chart turns `configuration.backupStorageLocation[]` + `schedules{}` into the
+# Velero CRDs (`BackupStorageLocation`, `Schedule`).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: velero-overrides
+  namespace: ${VELERO_NS}
+data:
+  values.yaml: |
+    configuration:
+      backupStorageLocation:
+        # ---- keep the built-in/default BSL (on NKP the mgmt cluster already has one) ----
+        - name: default
+          provider: aws
+          bucket: <INTERNAL_BUCKET>            # EDIT-ME (or remove this entry)
+          default: true
+          config:
+            profile: "default"
+            region: <INTERNAL_REGION>
+            s3ForcePathStyle: "true"
+            insecureSkipTLSVerify: "true"      # lab/self-signed only
+            s3Url: <INTERNAL_S3_URL>
+        # ---- ADD a secondary / offsite BSL ----
+        - name: secondary-offsite
+          provider: aws
+          bucket: <YOUR_BUCKET>                # EDIT-ME
+          default: false
+          config:
+            profile: "secondary"               # must exist in the credentials `cloud` file
+            region: <YOUR_REGION>              # EDIT-ME (use us-east-1 for MinIO / Objects)
+            s3ForcePathStyle: "false"          # "true" for MinIO / Nutanix Objects / generic S3
+            # s3Url: https://s3.example.com    # EDIT-ME for non-AWS S3 (MinIO/Objects/Ceph)
+            # insecureSkipTLSVerify: "true"    # lab/self-signed only
+    # ---- scheduled backups ----
+    schedules:
+      default:                                 # -> Schedule "velero-default"
+        schedule: "0 0 * * *"
+        template:
+          ttl: 720h
+      secondary-manifests:                     # -> Schedule "velero-secondary-manifests"
+        schedule: "0 2 * * *"
+        template:
+          ttl: 720h
+          storageLocation: secondary-offsite
+          snapshotVolumes: false               # manifests-only
+          includedNamespaces: ["*"]
+          includeClusterResources: true
+    credentials:
+      existingSecret: velero-offsite-credentials   # the Secret from credentials-secret.example.yaml
+      secretContents:
+        cloud: cloud

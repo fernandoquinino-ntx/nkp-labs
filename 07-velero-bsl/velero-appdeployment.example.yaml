@@ -1,0 +1,34 @@
+# velero-appdeployment.example.yaml — point the Velero AppDeployment at the override ConfigMap.
+#
+# COPY -> velero-appdeployment.yaml ; edit ; apply:
+#   kubectl -n ${VELERO_NS} apply --server-side -f velero-appdeployment.yaml
+#
+# CLI equivalent:
+#   nkp create appdeployment velero --app velero-12.0.0 --workspace <workspace> \
+#       -c velero-overrides --kubeconfig <kubeconfig>
+#
+# API versions / how to find the live values:
+#   kubectl -n ${VELERO_NS} get appdeployment velero -o jsonpath='{.spec.appRef.name}'
+apiVersion: apps.kommander.d2iq.io/v1alpha3
+kind: AppDeployment
+metadata:
+  name: velero
+  namespace: ${VELERO_NS}
+spec:
+  appRef:
+    appID: velero
+    kind: ClusterApp                 # Velero ships as a NKP ClusterApp
+    name: velero-12.0.0              # EDIT-ME  (match the live app version)
+  # Workspace-wide override — the field the Kommander UI reads/writes.
+  configOverrides:
+    name: velero-overrides
+  # Per-cluster override (optional).
+  clusterConfigOverrides:
+    - appVersion: "12.0.0"           # EDIT-ME
+      clusterSelector:
+        matchExpressions:
+          - key: kommander.d2iq.io/cluster-name
+            operator: In
+            values:
+              - "<CLUSTER_NAME>"     # EDIT-ME
+      configMapName: velero-overrides
