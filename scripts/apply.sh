@@ -20,9 +20,14 @@ files=("$ROOT/rendered/$LAB"/*.yaml)          # top-level only (skip subdirs)
 shopt -u nullglob
 [ "${#files[@]}" -gt 0 ] || { echo "no manifests in rendered/$LAB/" >&2; exit 1; }
 
-# concatenate to a real temp file (kubectl -f needs a seekable file)
+# Concatenate to a real temp file, with `---` BETWEEN files (a plain `cat f1 f2` would merge the
+# last doc of one file with the first of the next, and kubectl would silently drop them).
 tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT
-cat "${files[@]}" > "$tmp"
+for f in "${files[@]}"; do
+  printf -- '---\n' >> "$tmp"
+  cat "$f" >> "$tmp"
+  printf '\n' >> "$tmp"
+done
 kubectl apply -f "$tmp"
 
 echo
