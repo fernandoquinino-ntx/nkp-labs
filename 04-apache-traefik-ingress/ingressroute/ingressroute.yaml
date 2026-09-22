@@ -4,6 +4,10 @@
 # Why use it: Traefik CRDs give you Traefik features (middlewares, weighted services, TCP/UDP,
 # entrypoint selection) that the portable k8s `Ingress` doesn't expose. Traefik CRDs carry **no
 # `ingressClassName`** — they are always handled by Traefik itself.
+#
+# NOTE this cluster's Traefik entrypoints: `web` (:8000) REDIRECTS to https (:443) and
+# `websecure` (:8443) is the TLS entrypoint. So a plain-HTTP IngressRoute would just redirect and
+# then 404 on https -> use `websecure` + `tls: {}` (or list both and keep `tls`).
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -11,20 +15,20 @@ metadata:
   namespace: ${NAMESPACE}
 spec:
   entryPoints:
-    - web                       # HTTP. For HTTPS add `websecure` here AND uncomment `tls:` below.
+    - websecure                 # serve HTTPS (TLS). Add `web` too if you also want plain HTTP.
   routes:
     - kind: Rule
       match: Host(`${APP_HOST}.${DOMAIN}`) && PathPrefix(`/`)
       services:
-        - name: apache           # the Service name (same namespace)
-          port: 80               # the Service port
-  # tls: {}                       # uncomment -> serve HTTPS with the cluster's DEFAULT certificate
-  #                               # (or: tls: { secretName: my-tls } for your own cert)
+        - name: apache          # the Service name (same namespace)
+          port: 80              # the Service port
+  tls: {}                        # -> use the cluster's DEFAULT certificate
+  # tls:
+  #   secretName: apache-tls     # -> or your own cert Secret (same namespace)
 ---
-# OPTIONAL extra: redirect HTTP -> HTTPS when you enable TLS above.
+# OPTIONAL extra: a middleware that redirects http->https, then attach it to a `web` route.
 # apiVersion: traefik.io/v1alpha1
 # kind: Middleware
 # metadata: { name: redirect-https, namespace: ${NAMESPACE} }
 # spec:
 #   redirectScheme: { scheme: https, permanent: true }
-# then add to the route:  middlewares: [{ name: redirect-https }]

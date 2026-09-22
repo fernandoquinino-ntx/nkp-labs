@@ -49,17 +49,17 @@ curl -H "Host: $APP_HOST.$DOMAIN" "http://<ingress-LB-IP>/"
 Apply it **instead of** the Ingress (delete the Ingress first if you already applied it):
 ```bash
 kubectl -n "$NS" delete ingress apache --ignore-not-found
-kubectl -n "$NS" apply -f 04-apache-traefik-ingress/ingressroute/ingressroute.yaml
+./scripts/render.sh 04-apache-traefik-ingress
+kubectl -n "$NS" apply -f rendered/04-apache-traefik-ingress/ingressroute/ingressroute.yaml
 kubectl -n "$NS" get ingressroute apache
-# -> https://doc.traefik.io/traefik/routing/providers/kubernetes-crd/
+curl -sk "https://$APP_HOST.$DOMAIN/"           # HTTPS (uses the default cert)
 ```
-The `IngressRoute`:
-- picks **entryPoints** (`web`, add `websecure` for HTTPS),
-- matches on `Host(...) && PathPrefix(...)`,
-- forwards to the `apache` Service.
-For HTTPS add `websecure` + `tls: {}` (uses the **default certificate**) or `tls: { secretName: … }`.
-Traefik CRDs carry **no `ingressClassName`** — Traefik always handles them, which is why they're handy
-for Traefik-only features (middlewares, weighted services, TCP/UDP, redirect-to-https).
+- **entryPoints**: this cluster's Traefik `web` (:8000) **redirects to https**, and `websecure` (:8443)
+  is the TLS entrypoint — so the example uses **`websecure` + `tls: {}`**. (A plain `web`-only route
+  would just redirect and then 404 on https.)
+- Traefik CRDs carry **no `ingressClassName`** — Traefik always handles them, which is why they're handy
+  for Traefik-only features (middlewares, weighted services, TCP/UDP, redirect-to-https). Docs:
+  <https://doc.traefik.io/traefik/routing/providers/kubernetes-crd/>.
 
 ## Troubleshooting
 - `404` / default backend → the `Host` header doesn't match, or the wrong class/controller.

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # render.sh <lab-dir|all> — substitute ${PLACEHOLDERS} from local.env into rendered/<lab>/.
+# Recurses into subdirectories (e.g. a lab's "alternative" manifests) so they render too.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
@@ -21,15 +22,14 @@ if [ "$TARGET" = "all" ]; then mapfile -t LABS < <(cd "$ROOT" && ls -d [0-9][0-9
 
 for d in "${LABS[@]}"; do
   src="$ROOT/${d%/}"; [ -d "$src" ] || { echo "no such lab: $src" >&2; exit 1; }
-  lab="$(basename "$src")"; mkdir -p "$OUT/$lab"
-  shopt -s nullglob
-  for f in "$src"/*.yaml; do
-    out="$OUT/$lab/$(basename "$f")"; cp "$f" "$out"
+  lab="$(basename "$src")"
+  while IFS= read -r f; do
+    rel="${f#"$src"/}"; out="$OUT/$lab/$rel"; mkdir -p "$(dirname "$out")"
+    cp "$f" "$out"
     for key in $KEYS; do
       val="${!key:-}"; [ -n "$val" ] || continue
       sed -i "s|\${${key}}|${val}|g" "$out"
     done
-  done
-  shopt -u nullglob
+  done < <(find "$src" -type f -name '*.yaml' | sort)
 done
 echo "rendered -> $OUT"
