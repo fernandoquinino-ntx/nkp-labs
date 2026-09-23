@@ -20,7 +20,8 @@ The manifests are **portable templates** (they use `${PLACEHOLDERS}`); you suppl
 | 07 | [07-velero-bsl](07-velero-bsl/) | configure a **Velero Backup Storage Location (BSL)** (UI + CLI), write **backup policies** (`Schedule`s), **back up & restore a persistent app** (volumes), + the Velero/NKP **CRDs** |
 | 08 | [08-splunk-otel-helm](08-splunk-otel-helm/) | install the **Splunk OpenTelemetry Collector** with **plain `helm`** (no catalog) — every setting explained, **logs + metrics** to Splunk over HEC, and **troubleshooting** |
 | 09 | [09-traefik-oidc-okta](09-traefik-oidc-okta/) | protect an app with **Okta OIDC** using the **Traefik OIDC plugin middleware** — a hands-on lab with a **page per step** (`steps/01…10`), no oauth2-proxy, no Dex |
-| 10 | [10-vault-eso](10-vault-eso/) | pull a secret from **HashiCorp Vault** with the **External Secrets Operator** — the **`ClusterSecretStore`** (the "credential store") set via an **NKP `AppDeployment` override** (`extraObjects`), so it is **visible/editable in the UI** |
+| 10 | [10-vault-install](10-vault-install/) | install **HashiCorp Vault** (dev / standalone / HA), **initialize + unseal** it, enable a **KV v2** engine and reach the UI — the prerequisite for lab 11 |
+| 11 | [11-vault-eso](11-vault-eso/) | pull a secret from **Vault** with the **External Secrets Operator** — the **`ClusterSecretStore`** (the "credential store") set via an **NKP `AppDeployment` override** (`extraObjects`), so it is **visible/editable in the UI** |
 
 ## Procedures (step-by-step, copy-paste)
 
@@ -86,15 +87,19 @@ Prefer the raw commands? `./scripts/render.sh <lab>` writes `rendered/<lab>/` an
 | `OKTA_CLIENT_ID` / `OKTA_CLIENT_SECRET` | Okta app credentials (lab 09) | `<id>` / `<secret>` (**secret**) |
 | `OIDC_SESSION_KEY` | cookie encryption key, ≥32 bytes (lab 09) | `openssl rand -base64 32` (**secret**) |
 | `OIDC_ALLOWED_DOMAINS` / `OIDC_ALLOWED_GROUPS` | authorization filters (lab 09) | `example.com` / `My-App-Users` |
-| `WORKLOAD_CLUSTER` / `WORKSPACE_NS` | target workload cluster / its **workspace** namespace on the mgmt cluster (lab 10) | `ds-cluster01` / `datascience-xmfnz` |
-| `ESO_APP_ID` / `ESO_APP_VERSION` / `ESO_CLUSTERAPP` / `ESO_OVERRIDES_CM` | ESO platform app + the AppDeployment override ConfigMap (lab 10) | `external-secrets` / `2.3.0` / `external-secrets-2.3.0` / `external-secrets-overrides` |
-| `ESO_NAMESPACE` / `ESO_SA` | where ESO runs / the SA it presents to Vault (lab 10) | `external-secrets` / `eso-vault` |
-| `SECRETSTORE_NAME` / `EXTERNAL_SECRET_NAME` | the `ClusterSecretStore` / the `ExternalSecret` (lab 10) | `vault-backend` / `lab-app-credentials` |
-| `VAULT_SERVER` / `VAULT_CA_BUNDLE` | Vault endpoint reachable from the workload / base64 PEM of its CA (lab 10) | `https://vault.nkp.ntnxlab.local` / `scripts/fetch-vault-ca.sh` (**secret-ish**) |
-| `VAULT_AUTH_MOUNT` / `VAULT_ROLE` / `VAULT_POLICY` | Vault kubernetes auth mount / role / policy (lab 10) | `kubernetes-ds-cluster01` / `eso` / `eso-ds-cluster01` |
-| `VAULT_KV_MOUNT` / `VAULT_SECRET_PATH` | KV v2 engine mount / item path (lab 10) | `secret` / `app-credentials` |
-| `VAULT_USERNAME` / `VAULT_PASSWORD` | the demo secret seeded in Vault (lab 10, **secret**) | `admin` / `CHANGE-ME` |
-| `DEMO_IMAGE` | demo consumer image (lab 10) | `busybox:1.36` |
+| `VAULT_NAMESPACE` / `VAULT_RELEASE` | where Vault runs / its Helm release name (lab 10) | `vault` / `vault` |
+| `VAULT_HOST` / `VAULT_STORAGE_CLASS` | ingress hostname / PVC storage class for Vault (lab 10) | `vault.nkp.ntnxlab.local` / `nutanix-volume` |
+| `VAULT_REPLICAS` | Vault HA replicas (1 = standalone, 3 = HA raft) (lab 10) | `1` |
+| `VAULT_APP_VERSION` | NKP catalog Vault app version (lab 10) | `0.34.1` |
+| `WORKLOAD_CLUSTER` / `WORKSPACE_NS` | target workload cluster / its **workspace** namespace on the mgmt cluster (lab 11) | `ds-cluster01` / `datascience-xmfnz` |
+| `ESO_APP_ID` / `ESO_APP_VERSION` / `ESO_CLUSTERAPP` / `ESO_OVERRIDES_CM` | ESO platform app + the AppDeployment override ConfigMap (lab 11) | `external-secrets` / `2.3.0` / `external-secrets-2.3.0` / `external-secrets-overrides` |
+| `ESO_NAMESPACE` / `ESO_SA` | where ESO runs / the SA it presents to Vault (lab 11) | `external-secrets` / `eso-vault` |
+| `SECRETSTORE_NAME` / `EXTERNAL_SECRET_NAME` | the `ClusterSecretStore` / the `ExternalSecret` (lab 11) | `vault-backend` / `lab-app-credentials` |
+| `VAULT_SERVER` / `VAULT_CA_BUNDLE` | Vault endpoint reachable from the workload / base64 PEM of its CA (lab 11) | `https://vault.nkp.ntnxlab.local` / `scripts/fetch-vault-ca.sh` (**secret-ish**) |
+| `VAULT_AUTH_MOUNT` / `VAULT_ROLE` / `VAULT_POLICY` | Vault kubernetes auth mount / role / policy (lab 11) | `kubernetes-ds-cluster01` / `eso` / `eso-ds-cluster01` |
+| `VAULT_KV_MOUNT` / `VAULT_SECRET_PATH` | KV v2 engine mount / item path (lab 11) | `secret` / `app-credentials` |
+| `VAULT_USERNAME` / `VAULT_PASSWORD` | the demo secret seeded in Vault (lab 11, **secret**) | `admin` / `CHANGE-ME` |
+| `DEMO_IMAGE` | demo consumer image (lab 11) | `busybox:1.36` |
 
 ## Layout
 
@@ -102,7 +107,7 @@ Prefer the raw commands? `./scripts/render.sh <lab>` writes `rendered/<lab>/` an
 local.env.example   # documented defaults (copy to local.env)
 scripts/            # render.sh, apply.sh, cleanup.sh, dns-add.sh
 rendered/           # generated (gitignored)
-00-prereqs/ … 10-vault-eso/
+00-prereqs/ … 11-vault-eso/
 ```
 
 ## License

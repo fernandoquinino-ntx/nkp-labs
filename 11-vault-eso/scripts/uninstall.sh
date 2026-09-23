@@ -2,9 +2,9 @@
 # uninstall.sh — OPTIONAL shortcut for step 10: remove what the lab created.
 #
 # Usage:
-#   ./10-vault-eso/scripts/uninstall.sh              # raw objects + the Vault glue on the workload
-#   ./10-vault-eso/scripts/uninstall.sh --app        # ALSO delete the ESO AppDeployment (uninstalls ESO)
-#   ./10-vault-eso/scripts/uninstall.sh --vault-mount # ALSO disable the ds-cluster01 auth mount on Vault
+#   ./11-vault-eso/scripts/uninstall.sh              # raw objects + the Vault glue on the workload
+#   ./11-vault-eso/scripts/uninstall.sh --app        # ALSO delete the ESO AppDeployment (uninstalls ESO)
+#   ./11-vault-eso/scripts/uninstall.sh --vault-mount # ALSO disable the ds-cluster01 auth mount on Vault
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$HERE"

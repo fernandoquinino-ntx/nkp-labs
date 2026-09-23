@@ -1,0 +1,24 @@
+# NKP catalog path — deploy HashiCorp Vault as an app, the same way as ESO (lab 11).
+#
+# In the UI:  Management Cluster Workspace ▸ Applications ▸ Vault ▸ Enable
+#             (that creates this AppDeployment for you; the "Edit configuration" overlay edits its
+#              override ConfigMap of Helm values).
+#
+# This file is a reference. Apply with:
+#   kubectl apply -f appdeployment.example.yaml     # (rendered with your local.env)
+apiVersion: apps.kommander.d2iq.io/v1alpha3
+kind: AppDeployment
+metadata:
+  name: vault
+  namespace: kommander
+spec:
+  appRef:
+    kind: App
+    appID: vault
+    name: vault-${VAULT_APP_VERSION}       # e.g. vault-0.34.1  (kubectl get app | grep vault)
+  # Optional: point at a ConfigMap of Helm values to override the app defaults:
+  # configOverrides:
+  #   name: vault-overrides
+  #
+  # The values the app starts from live in `ConfigMap/vault-config-defaults` in this namespace —
+  # edit/examine them there (server.standalone|ha, dataStorage.size/storageClass, ui, ingress, injector).

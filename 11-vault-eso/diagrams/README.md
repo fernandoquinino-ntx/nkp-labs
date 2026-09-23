@@ -1,4 +1,4 @@
-# Lab 10 — diagrams
+# Lab 11 — diagrams
 
 Mermaid diagrams for "Vault → Kubernetes via the External Secrets Operator, configured by an NKP
 AppDeployment override". Each diagram also exists as a standalone `.mmd` you can render/copy into a

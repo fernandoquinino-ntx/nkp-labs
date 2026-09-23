@@ -48,11 +48,11 @@ If DNS/egress is the problem, check the Traefik LB IP for `vault.nkp.ntnxlab.loc
 
 ## Fill `local.env`
 
-Copy the example and set the Lab 10 block (see the README variables table). Then populate the CA
+Copy the example and set the Lab 11 block (see the README variables table). Then populate the CA
 bundle automatically:
 
 ```bash
-./10-vault-eso/scripts/fetch-vault-ca.sh
+./11-vault-eso/scripts/fetch-vault-ca.sh
 # writes VAULT_CA_BUNDLE=<base64 of the Root CA> into local.env (or prints it)
 ```
 

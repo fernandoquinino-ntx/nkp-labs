@@ -11,8 +11,8 @@ mount for the workload cluster.
 Shortcut (writes to the workload + management clusters):
 
 ```bash
-./10-vault-eso/scripts/vault-remote-auth.sh                 # dry-run: print the commands
-./10-vault-eso/scripts/vault-remote-auth.sh --apply         # do it
+./11-vault-eso/scripts/vault-remote-auth.sh                 # dry-run: print the commands
+./11-vault-eso/scripts/vault-remote-auth.sh --apply         # do it
 ```
 
 By hand:

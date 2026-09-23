@@ -1,4 +1,4 @@
-# Lab 10 — Vault + External Secrets Operator (`ClusterSecretStore` → `ExternalSecret`)
+# Lab 11 — Vault + External Secrets Operator (`ClusterSecretStore` → `ExternalSecret`)
 
 **Learn:** how to pull a secret out of **HashiCorp Vault** into a native Kubernetes Secret with the
 **External Secrets Operator (ESO)**, and how to set the Vault **connection** (the "credential store")
@@ -39,6 +39,7 @@ The three objects ESO deals with:
 | **`ExternalSecret`** | *"Pull path X / key Y from that store, materialise Secret Z here, keep it in sync."* |
 | **`Secret`** | The plain Kubernetes Secret ESO creates/owns — **what your app actually consumes.** |
 
+> **Short demo to show this environment:** [`DEMO.md`](DEMO.md) (a ~10-min, copy-paste walk-through).
 > Diagrams (overview, override wiring, pull sequence, per-cluster auth): [`diagrams/`](diagrams/).
 
 **Who runs this lab:** someone with `kubectl` on the NKP **management** cluster and on a **workload**
@@ -95,15 +96,15 @@ enabled on the workload cluster.
 ## Quick run (optional — the steps are the real lab)
 
 ```bash
-cp local.env.example local.env          # gitignored; fill in the Lab 10 block
-./10-vault-eso/scripts/fetch-vault-ca.sh          # fills VAULT_CA_BUNDLE from the live endpoint
+cp local.env.example local.env          # gitignored; fill in the Lab 11 block
+./11-vault-eso/scripts/fetch-vault-ca.sh          # fills VAULT_CA_BUNDLE from the live endpoint
 
-./10-vault-eso/scripts/vault-remote-auth.sh       # dry-run: prints the glue commands
-./10-vault-eso/scripts/vault-remote-auth.sh --apply
+./11-vault-eso/scripts/vault-remote-auth.sh       # dry-run: prints the glue commands
+./11-vault-eso/scripts/vault-remote-auth.sh --apply
 
-./10-vault-eso/scripts/install.sh                 # dry-run (path A)
-./10-vault-eso/scripts/install.sh --apply         # ns + override CM + AppDeployment
-./10-vault-eso/scripts/verify.sh
+./11-vault-eso/scripts/install.sh                 # dry-run (path A)
+./11-vault-eso/scripts/install.sh --apply         # ns + override CM + AppDeployment
+./11-vault-eso/scripts/verify.sh
 ```
 
 ---
@@ -155,6 +156,7 @@ Self-validation guide (Vault UI, list secrets, read this secret): [`vault/valida
   `${WORKLOAD_CLUSTER}` (`~/ds-cluster01.conf`).
 - A **Vault** running on the management cluster, **initialized + unsealed**, with the **KV v2** engine
   at `secret/` and its **web cert issued by your lab Root CA** (so `caBundle` can validate it).
+  → stand one up with **[Lab 10 — install Vault](../10-vault-install/README.md)**.
 - **ESO enabled on the workload cluster** (step 04). On NKP ≥ 2.17 it is pre-installed on the
   *management* cluster; the *workload* is where you enable it from the catalog.
 - The workload cluster must be able to reach `VAULT_SERVER` (DNS + the Traefik LB) on `:443`.

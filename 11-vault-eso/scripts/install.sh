@@ -7,8 +7,8 @@
 # and vault/kv-seed.md. It also assumes the override ConfigMap values in local.env are already correct.
 #
 # Usage:
-#   ./10-vault-eso/scripts/install.sh                 # dry-run (render + show what would be applied)
-#   ./10-vault-eso/scripts/install.sh --apply         # do it
+#   ./11-vault-eso/scripts/install.sh                 # dry-run (render + show what would be applied)
+#   ./11-vault-eso/scripts/install.sh --apply         # do it
 #
 # Kubeconfigs (from local.env, optional — otherwise the current context is used):
 #   MGMT_KUBECONFIG       -> the management cluster  (override CM + AppDeployment)

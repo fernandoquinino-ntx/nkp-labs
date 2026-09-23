@@ -17,8 +17,8 @@ Copy and fill [`../overrides/eso-overrides.example.yaml`](../overrides/eso-overr
 (rendered with your `local.env` values):
 
 ```bash
-./scripts/render.sh 10-vault-eso            # -> rendered/10-vault-eso/overrides/eso-overrides.example.yaml
-cp rendered/10-vault-eso/overrides/eso-overrides.example.yaml eso-overrides.yaml
+./scripts/render.sh 11-vault-eso            # -> rendered/11-vault-eso/overrides/eso-overrides.example.yaml
+cp rendered/11-vault-eso/overrides/eso-overrides.example.yaml eso-overrides.yaml
 $EDITOR eso-overrides.yaml                  # (already substituted if local.env is set)
 
 MG="kubectl --kubeconfig ~/dc1-nkp-cl01.conf"

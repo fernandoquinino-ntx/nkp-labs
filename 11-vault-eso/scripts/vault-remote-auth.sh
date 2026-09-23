@@ -7,8 +7,8 @@
 #              policy <VAULT_POLICY>, role <VAULT_ROLE>
 #
 # Usage:
-#   ./10-vault-eso/scripts/vault-remote-auth.sh           # dry-run (prints the steps)
-#   ./10-vault-eso/scripts/vault-remote-auth.sh --apply
+#   ./11-vault-eso/scripts/vault-remote-auth.sh           # dry-run (prints the steps)
+#   ./11-vault-eso/scripts/vault-remote-auth.sh --apply
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$HERE"

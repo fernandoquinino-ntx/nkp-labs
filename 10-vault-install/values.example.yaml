@@ -1,0 +1,42 @@
+# Helm values for a SIMPLE standalone Vault.
+#   helm install ${VAULT_RELEASE} hashicorp/vault -n ${VAULT_NAMESPACE} --create-namespace -f values.yaml
+#
+# For dev mode (throwaway) use instead:  --set "server.dev.enabled=true"
+# For HA raft (3 replicas) set:          server.ha.enabled=true / server.ha.raft.enabled=true / server.ha.replicas=3
+global:
+  enabled: true
+
+server:
+  # --- single-node, persistent data (simplest real install) ---
+  standalone:
+    enabled: true
+  dataStorage:
+    enabled: true
+    size: 10Gi
+    storageClass: ${VAULT_STORAGE_CLASS}     # "" = use the cluster default StorageClass
+  ui:
+    enabled: true
+
+  # --- optional: expose the UI/API on a hostname through Traefik (needs a `vault-tls` secret) ---
+  # ingress:
+  #   enabled: true
+  #   ingressClassName: kommander-traefik
+  #   annotations:
+  #     traefik.ingress.kubernetes.io/router.entrypoints: websecure
+  #   hosts:
+  #     - host: ${VAULT_HOST}
+  #       paths: ["/"]
+  #   tls:
+  #     - secretName: vault-tls
+  #       hosts: [${VAULT_HOST}]
+
+# top-level UI toggle (older chart layout) — harmless to keep
+ui:
+  enabled: true
+
+# the agent injector (sidecar-based secret injection). ESO users may set this to false.
+injector:
+  enabled: true
+
+csi:
+  enabled: false

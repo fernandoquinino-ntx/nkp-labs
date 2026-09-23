@@ -6,9 +6,9 @@
 # the LAST certificate of the chain returned by the endpoint.
 #
 # Usage:
-#   ./10-vault-eso/scripts/fetch-vault-ca.sh                    # use VAULT_SERVER from local.env
-#   ./10-vault-eso/scripts/fetch-vault-ca.sh https://vault.example:8200
-#   ./10-vault-eso/scripts/fetch-vault-ca.sh --print            # do not edit local.env, just print
+#   ./11-vault-eso/scripts/fetch-vault-ca.sh                    # use VAULT_SERVER from local.env
+#   ./11-vault-eso/scripts/fetch-vault-ca.sh https://vault.example:8200
+#   ./11-vault-eso/scripts/fetch-vault-ca.sh --print            # do not edit local.env, just print
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$HERE"

@@ -2,7 +2,7 @@
 # verify.sh — check the whole flow: ESO on the workload, the store, the ExternalSecret, the synced
 # Secret and the demo pod's view of it.
 #
-# Usage: ./10-vault-eso/scripts/verify.sh
+# Usage: ./11-vault-eso/scripts/verify.sh
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$HERE"

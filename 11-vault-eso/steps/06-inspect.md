@@ -35,8 +35,8 @@ What each object tells you:
 If you want to see the objects without the AppDeployment override:
 
 ```bash
-$DS apply -f rendered/10-vault-eso/eso/clustersecretstore.example.yaml   # (rendered)
-$DS apply -f rendered/10-vault-eso/eso/externalsecret.example.yaml
+$DS apply -f rendered/11-vault-eso/eso/clustersecretstore.example.yaml   # (rendered)
+$DS apply -f rendered/11-vault-eso/eso/externalsecret.example.yaml
 ```
 
 > Don't do both paths at once (same object names → they fight). Namespace-scoped `SecretStore` instead

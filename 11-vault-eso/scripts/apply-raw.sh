@@ -7,8 +7,8 @@
 # (same object names).
 #
 # Usage:
-#   ./10-vault-eso/scripts/apply-raw.sh              # dry-run (render + show)
-#   ./10-vault-eso/scripts/apply-raw.sh --apply
+#   ./11-vault-eso/scripts/apply-raw.sh              # dry-run (render + show)
+#   ./11-vault-eso/scripts/apply-raw.sh --apply
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$HERE"
