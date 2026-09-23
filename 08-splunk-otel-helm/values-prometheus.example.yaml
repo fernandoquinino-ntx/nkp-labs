@@ -1,0 +1,64 @@
+# =============================================================================
+# values-prometheus.example.yaml — OPTIONAL add-on: ship NKP's Prometheus metrics
+# =============================================================================
+# This is a SECOND Helm values file, merged OVER values.example.yaml:
+#
+#     helm ... -f values.example.yaml -f values-prometheus.example.yaml
+#
+# `install.sh --prometheus` adds it for you (or set PROMETHEUS_ENABLED=1 in
+# local.env). Without it, the collector does NOT touch Prometheus at all.
+#
+# WHAT IT DOES: federates Prometheus's /federate endpoint, i.e. ships the series
+# NKP's kube-prometheus-stack already scraped (28 ServiceMonitors + KSM +
+# node-exporter + …), including targets the collector could never scrape itself
+# (etcd/apiserver mTLS, auth'd endpoints). No ServiceMonitor replication, no
+# credentials to copy.
+#
+# WHY the CLUSTER RECEIVER (not the agent): the agent is a DaemonSet — one pod per
+# node — so federating there would scrape the same Prometheus N times and
+# duplicate every series. The cluster receiver is ONE pod per cluster.
+#
+# SCOPE / COST — measured on the lab, one scrape (Splunk metrics bill PER datapoint):
+#   * default below (NKP platform jobs, no histogram buckets) ~18k series / 9.5 MB
+#   * {__name__=~"kube_.*|node_.*",__name__!~".*_bucket"}      ~44k series / 24 MB
+#   * {__name__!~".*_bucket"}                      (all, no histograms) ~192k / 99 MB
+#   * {__name__=~".+"}                                        ~457k series / 218 MB  <-- "everything"
+# To widen/narrow, edit the `match[]` selector below.
+# =============================================================================
+
+clusterReceiver:
+  config:
+    receivers:
+      prometheus/nkp:
+        # SCHEMA GOTCHA: it is `config.scrape_configs` — NOT `config.config.scrape_configs`.
+        # The doubled form is only valid INSIDE `receiver_creator`; as a standalone
+        # receiver it CrashLoops with:
+        #   'config' prometheus receiver: … field config not found in type config.plain
+        config:
+          scrape_configs:
+            - job_name: nkp-prometheus-federate
+              scrape_interval: 60s
+              scrape_timeout: 50s
+              metrics_path: /federate
+              params:
+                'match[]':
+                  - '{job=~"kommander.*|nkp-.*|opencost|centralized-.*|kubefed-.*|kubetunnel-.*|loggingstack-.*|dex-.*|kube-prometheus-stack-.*|karma|grafana-logging",__name__!~".*_bucket"}'
+              static_configs:
+                # NKP's Prometheus service (kube-prometheus-stack in namespace `kommander`).
+                - targets:
+                    - kube-prometheus-stack-prometheus.kommander.svc:9090
+    service:
+      pipelines:
+        metrics:
+          # lists are REPLACED (not merged) -> the base pipeline's receiver must
+          # be repeated here, otherwise k8s_cluster metrics stop.
+          receivers: [k8s_cluster, prometheus/nkp]
+  # WHY bigger than the base: parsing tens of thousands of federated series every
+  # scrape needs headroom. Watch memory and tune.
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi

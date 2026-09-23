@@ -62,6 +62,7 @@ UI**, not with a script.
 | File | What |
 |---|---|
 | [`values.example.yaml`](values.example.yaml) | **the star** — annotated Helm values (every key has a `# WHY:`) |
+| [`values-prometheus.example.yaml`](values-prometheus.example.yaml) | optional add-on values file: federate NKP's Prometheus (added by `install.sh --prometheus`) |
 | [`namespace.yaml`](namespace.yaml) | the namespace (`${OTEL_NAMESPACE}`) so `scripts/apply.sh`/`cleanup.sh` work |
 | [`install.sh`](install.sh) | render → `helm repo add` → `helm upgrade --install` (`--dry-run`, `--apply`, `--template`) |
 | [`verify.sh`](verify.sh) | end-to-end check: pods, drops, **per-receiver counters**, HEC probe, SPL |
@@ -129,6 +130,7 @@ The variables this lab uses:
 | `SPLUNK_HEC_TOKEN` | `<hec-token>` | **secret** — lives only in `local.env` (gitignored) |
 | `SPLUNK_INDEX` | `k8s_logs` | events index — **must be token-allowed** |
 | `SPLUNK_METRICS_INDEX` | `k8s_metrics` | metrics index — **must be token-allowed** |
+| `PROMETHEUS_ENABLED` | `1` (or unset) | optional: also ship NKP's Prometheus metrics — same as passing `--prometheus` |
 
 ---
 
@@ -256,9 +258,11 @@ receiver is one pod per cluster. That is why the block lives under `clusterRecei
 
 Splunk metrics are billed per datapoint, and "everything" is 218 MB **per scrape** — so the lab
 defaults to the NKP-platform scope (metrics you don't already get from `kubelet_stats` /
-`k8s_cluster`), ~18k series at one scrape/minute. Edit the `match[]` line in
-[`values.example.yaml`](values.example.yaml) to widen or narrow it (the selector lives in the file,
-not `local.env`, because `|`/quotes don't survive the placeholder renderer).
+`k8s_cluster`), ~18k series at one scrape/minute. The whole thing lives in
+[`values-prometheus.example.yaml`](values-prometheus.example.yaml) and is added only when you run
+`./08-splunk-otel-helm/install.sh --prometheus` (or set `PROMETHEUS_ENABLED=1`). Edit the `match[]`
+line there to widen or narrow it (it lives in the file, not `local.env`, because `|`/quotes don't
+survive the placeholder renderer).
 
 ```yaml
 clusterReceiver:
@@ -323,7 +327,14 @@ Observed on the lab: `prometheus/nkp` ≈ **73k points** in ~4 min, cluster rece
 
 # install / upgrade
 ./08-splunk-otel-helm/install.sh --apply
+
+# ...and ALSO ship NKP's Prometheus metrics (adds the federation values file)
+./08-splunk-otel-helm/install.sh --apply --prometheus
 ```
+
+Prometheus is **off unless you ask for it**: `--prometheus` (or `PROMETHEUS_ENABLED=1` in
+`local.env`) merges the second values file [`values-prometheus.example.yaml`](values-prometheus.example.yaml);
+`--no-prometheus` forces it off. See “Sending Prometheus metrics” below for the cost of each scope.
 
 Under the hood `install.sh` runs the equivalent of:
 
@@ -333,7 +344,8 @@ helm repo update
 helm -n "$OTEL_NAMESPACE" upgrade --install "$OTEL_RELEASE" \
   splunk-otel-collector-chart/splunk-otel-collector \
   --version "$CHART_VERSION" --create-namespace \
-  -f rendered/08-splunk-otel-helm/values.example.yaml
+  -f rendered/08-splunk-otel-helm/values.example.yaml \
+  -f rendered/08-splunk-otel-helm/values-prometheus.example.yaml   # only with --prometheus
 ```
 
 **No Helm release state?** use the GitOps-style path (renders with Helm, applies with kubectl):

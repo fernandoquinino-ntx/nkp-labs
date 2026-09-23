@@ -11,6 +11,12 @@
 #   ./08-splunk-otel-helm/install.sh --apply      # install / upgrade
 #   ./08-splunk-otel-helm/install.sh --template   # render with `helm template` and `kubectl apply`
 #                                                 #   (no Helm release state — GitOps-style)
+#   ... --prometheus                              # ALSO ship NKP's Prometheus metrics (federation)
+#   ... --no-prometheus                           # force it OFF (overrides local.env)
+#
+# Prometheus: default follows PROMETHEUS_ENABLED in local.env (unset = off). When
+# on, it merges the extra values file values-prometheus.example.yaml (a /federate
+# receiver on the cluster receiver). See the lab README for the cost of each scope.
 #
 # Requires: helm, kubectl. Config comes from ./local.env (copy local.env.example first).
 set -euo pipefail
@@ -24,13 +30,16 @@ LAB="$(basename "$HERE")"
 ENV_FILE="${ENV_FILE:-$ROOT/local.env}"
 
 MODE="dry-run"
+PROM=""          # "" = follow PROMETHEUS_ENABLED from local.env; 1 = on; 0 = off
 for a in "$@"; do
   case "$a" in
-    --apply)    MODE="apply" ;;
-    --dry-run)  MODE="dry-run" ;;
-    --template) MODE="template" ;;
-    -h|--help)  sed -n '2,20p' "$0"; exit 0 ;;
-    *) echo "unknown flag: $a (use --apply | --dry-run | --template)" >&2; exit 2 ;;
+    --apply)         MODE="apply" ;;
+    --dry-run)       MODE="dry-run" ;;
+    --template)      MODE="template" ;;
+    --prometheus)    PROM=1 ;;
+    --no-prometheus) PROM=0 ;;
+    -h|--help)       sed -n '2,26p' "$0"; exit 0 ;;
+    *) echo "unknown flag: $a (use --apply | --dry-run | --template | --prometheus | --no-prometheus)" >&2; exit 2 ;;
   esac
 done
 
@@ -49,6 +58,10 @@ set -a; . "$ENV_FILE"; set +a
 : "${SPLUNK_METRICS_INDEX:?set SPLUNK_METRICS_INDEX in local.env}"
 : "${SPLUNK_CLUSTER_NAME:?set SPLUNK_CLUSTER_NAME in local.env}"
 
+# Prometheus federation: --prometheus/--no-prometheus win; otherwise local.env's
+# PROMETHEUS_ENABLED (default off). It is an extra -f values file, merged on top.
+[ -n "$PROM" ] || PROM="${PROMETHEUS_ENABLED:-0}"
+
 REPO_NAME="splunk-otel-collector-chart"
 REPO_URL="https://signalfx.github.io/splunk-otel-collector-chart"
 
@@ -58,13 +71,27 @@ VALUES="$ROOT/rendered/$LAB/values.example.yaml"
 [ -f "$VALUES" ] || { echo "render produced no values.example.yaml" >&2; exit 1; }
 echo "   $VALUES"
 
+VALUES_ARGS=(-f "$VALUES")
+case "${PROM,,}" in
+  1|true|yes|on)
+    PROM_VALUES="$ROOT/rendered/$LAB/values-prometheus.example.yaml"
+    [ -f "$PROM_VALUES" ] || { echo "PROMETHEUS_ENABLED set but $PROM_VALUES is missing" >&2; exit 1; }
+    VALUES_ARGS+=(-f "$PROM_VALUES")
+    echo "   + Prometheus federation ENABLED ($PROM_VALUES)"
+    echo "     (scope is the match[] selector in that file — see the lab README for cost)"
+    ;;
+  *)
+    echo "   (Prometheus collection OFF — pass --prometheus to enable)"
+    ;;
+esac
+
 echo "== 2/3 helm repo add/update ($REPO_NAME) =="
 helm repo add "$REPO_NAME" "$REPO_URL" >/dev/null 2>&1 || true
 helm repo update "$REPO_NAME" >/dev/null
 
 CHART="$REPO_NAME/splunk-otel-collector"
 echo "== 3/3 chart $CHART --version $CHART_VERSION  ->  ns/$OTEL_NAMESPACE release/$OTEL_RELEASE =="
-HELM_ARGS=(--version "$CHART_VERSION" -n "$OTEL_NAMESPACE" --create-namespace -f "$VALUES")
+HELM_ARGS=(--version "$CHART_VERSION" -n "$OTEL_NAMESPACE" --create-namespace "${VALUES_ARGS[@]}")
 
 case "$MODE" in
   dry-run)
