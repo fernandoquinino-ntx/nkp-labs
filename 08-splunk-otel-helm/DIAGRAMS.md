@@ -177,6 +177,8 @@ nothing and drops nothing).
 
 ## See also
 
+- [`OPERATIONAL-MODE.md`](OPERATIONAL-MODE.md) — the detailed "what it pulls" model (receivers, targets,
+  auth, intervals, processors, exporter guarantees, ports).
 - [`README.md`](README.md) — the step-by-step lab, the values with WHY, and the troubleshooting matrix.
 - [`values.example.yaml`](values.example.yaml) — every value documented (WHAT/DEFAULT/OURS/WHY/BREAKS).
 - [`values-prometheus.example.yaml`](values-prometheus.example.yaml) — the Prometheus federation add-on.

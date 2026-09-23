@@ -10,6 +10,8 @@ cluster to Splunk over **HEC**, verify it, and **troubleshoot** it when it break
 >
 > **Prefer pictures?** [`DIAGRAMS.md`](DIAGRAMS.md) has Mermaid diagrams for how it is installed,
 > configured, where data is collected and where it is sent, plus a troubleshooting flow.
+> **Want the operating model?** [`OPERATIONAL-MODE.md`](OPERATIONAL-MODE.md) explains exactly what the
+> collector *pulls* (each receiver, its target, auth, interval) and how data flows to Splunk.
 
 ---
 
@@ -66,6 +68,7 @@ UI**, not with a script.
 |---|---|
 | [`values.example.yaml`](values.example.yaml) | **the star** — annotated Helm values (every key has a `# WHY:`) |
 | [`DIAGRAMS.md`](DIAGRAMS.md) | Mermaid diagrams: install/configure flow, log + metric paths, precedence, troubleshooting flow |
+| [`OPERATIONAL-MODE.md`](OPERATIONAL-MODE.md) | **operating model**: what the collector pulls (receivers, targets, auth, intervals), processors, exporter guarantees, ports |
 | [`values-prometheus.example.yaml`](values-prometheus.example.yaml) | optional add-on values file: federate NKP's Prometheus (added by `install.sh --prometheus`) |
 | [`namespace.yaml`](namespace.yaml) | the namespace (`${OTEL_NAMESPACE}`) so `scripts/apply.sh`/`cleanup.sh` work |
 | [`install.sh`](install.sh) | render → `helm repo add` → `helm upgrade --install` (`--dry-run`, `--apply`, `--template`) |
