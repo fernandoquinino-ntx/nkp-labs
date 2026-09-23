@@ -44,7 +44,7 @@ $DS get crd | grep external-secrets.io
 
 Do not continue until the ESO controller is `Running` on the workload cluster.
 
-## ⚠ Verified caveat (2026-09-23, live)
+## ⚠ Observed caveat — a raw AppDeployment alone is not enough
 
 A **raw `AppDeployment` alone did NOT deliver ESO** to `ds-cluster01` in this lab. The app reached the
 management side (`AppDeploymentInstance` `GitReconciled`), but the workload never received it because
@@ -72,7 +72,7 @@ If those are stuck, fix the git-operator / workload Flux first — otherwise **e
 to the workspace's platform-app bundle, which the doc says must be deployed per workspace).
 
 > **Workaround while delivery is broken:** the same override mechanism works on a cluster whose app
-> delivery is healthy. It was verified on the **management** cluster (`kommander` ns +
+> delivery is healthy. It was exercised on the **management** cluster (`kommander` ns +
 > `external-secrets-overrides`) — see [`../vault/validate-in-vault-ui.md`](../vault/validate-in-vault-ui.md).
 
 ---

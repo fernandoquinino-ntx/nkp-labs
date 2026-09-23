@@ -131,10 +131,10 @@ cp local.env.example local.env          # gitignored; fill in the Lab 11 block
 
 ---
 
-## Validated live (2026-09-23)
+## Observed behaviour
 
-Tested on the lab: Vault → ESO → Kubernetes works, and the **override → `extraObjects`** mechanism was
-verified on the **management** cluster (its app delivery is healthy):
+On the lab: Vault → ESO → Kubernetes works, and the **override → `extraObjects`** mechanism was
+exercised on the **management** cluster (its app delivery is healthy):
 
 - created `ConfigMap/external-secrets-overrides` in ns `kommander` (the ESO HelmRelease lists it in
   `valuesFrom`);

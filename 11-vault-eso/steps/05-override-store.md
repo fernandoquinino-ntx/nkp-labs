@@ -102,7 +102,7 @@ $MG -n "${WORKSPACE_NS:-datascience-xmfnz}" get appdeploymentinstance -o name | 
 
 > The values **live in the ConfigMap** either way — the AppDeployment only ever holds a *reference*.
 > So "I don't see it in the AppDeployment" means the link is by-convention (or unset), **not** that
-> your values are ignored. Verified live: patching both fields made the reference appear and changed
+> your values are ignored. Observed on the lab: patching both fields made the reference appear and changed
 > nothing functionally (store stayed `Ready`, ExternalSecret stayed `SecretSynced`).
 
 ---
