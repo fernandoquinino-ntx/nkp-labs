@@ -214,13 +214,62 @@ agent:
 #      Kubernetes Events/objects (as logs) into splunkPlatform.index.
 clusterReceiver:
   enabled: true
+  # ---------------------------------------------------------------------------
+  # Prometheus federation — send the metrics NKP's Prometheus already scrapes.
+  # ---------------------------------------------------------------------------
+  # WHY here (not the agent): the agent runs on EVERY node, so federating there
+  #      would scrape the same Prometheus N times and duplicate every series.
+  #      The cluster receiver is ONE pod per cluster — the right place.
+  # WHY /federate: NKP ships kube-prometheus-stack; its Prometheus already holds
+  #      every scraped series (28 ServiceMonitors + node-exporter + KSM + …),
+  #      INCLUDING targets the collector cannot reach itself (etcd/apiserver mTLS,
+  #      auth'd endpoints). Federating asks Prometheus for its current series, so
+  #      we don't have to replicate ServiceMonitors or credentials.
+  # HOW to scope: `match[]` is a Prometheus selector. NKP's Prometheus is BIG —
+  #      ALL series = ~457k series / 218 MB per scrape (measured) → not viable.
+  #      The default below = NKP platform components + apps, WITHOUT histogram
+  #      buckets and WITHOUT the k8s-core families we already collect from
+  #      kubelet_stats / k8s_cluster  (~18k series / 9.5 MB per scrape).
+  #      Measured options (edit the `match[]` value to change):
+  #        {job=~"...default list...",__name__!~".*_bucket"}   ~18k series  (default)
+  #        {__name__=~"kube_.*|node_.*",__name__!~".*_bucket"}  ~44k series
+  #        {__name__!~".*_bucket"}                             ~192k series
+  #        {__name__=~".+"}             (EVERYTHING)           ~457k series / 218 MB
+  # NOTE: this block is edited HERE (not via local.env) — the selector contains
+  #       characters (|, quotes) that the placeholder renderer does not survive.
+  config:
+    receivers:
+      prometheus/nkp:
+        # NOTE the schema: the OTel prometheus receiver takes a Prometheus config
+        # under `config` (i.e. `config.scrape_configs`). Do NOT double it — the
+        # doubled `config.config` form only applies inside receiver_creator, and
+        # here it fails with "field config not found in type config.plain".
+        config:
+          scrape_configs:
+            - job_name: nkp-prometheus-federate
+              scrape_interval: 60s
+              scrape_timeout: 50s
+              metrics_path: /federate
+              params:
+                'match[]':
+                  - '{job=~"kommander.*|nkp-.*|opencost|centralized-.*|kubefed-.*|kubetunnel-.*|loggingstack-.*|dex-.*|kube-prometheus-stack-.*|karma|grafana-logging",__name__!~".*_bucket"}'
+              static_configs:
+                - targets:
+                    - kube-prometheus-stack-prometheus.kommander.svc:9090
+    service:
+      pipelines:
+        metrics:
+          # lists are REPLACED -> re-list the default receiver (k8s_cluster)!
+          receivers: [k8s_cluster, prometheus/nkp]
+  # WHY bigger than default: parsing tens of thousands of federated series needs
+  #      headroom. Watch memory after enabling and tune.
   resources:
     requests:
-      cpu: 100m
-      memory: 256Mi
+      cpu: 200m
+      memory: 512Mi
     limits:
-      cpu: 500m
-      memory: 500Mi
+      cpu: 1000m
+      memory: 1Gi
 
 # -----------------------------------------------------------------------------
 # Prometheus — OFF by default (this is what "is it from Prometheus?" means)

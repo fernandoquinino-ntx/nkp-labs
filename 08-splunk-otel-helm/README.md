@@ -189,7 +189,8 @@ receivers ─► memory_limiter ─► batch ─► resource_detection ─► re
 > workloads. With the default values the collector does **not** scrape **kube-state-metrics**,
 > **node-exporter**, application `/metrics`, or pods/services carrying `prometheus.io/scrape`
 > annotations (`autodetect.prometheus: false`, `agent.discovery.enabled: false`, and
-> `receiver_creator.receivers: null`).
+> `receiver_creator.receivers: null`). To actually ship NKP's Prometheus metrics, see
+> **“Sending Prometheus metrics (NKP's kube-prometheus-stack)”** just below.
 
 If you *do* want Prometheus endpoints, enable it explicitly — three options:
 
@@ -228,6 +229,88 @@ You can always discover the exact metric names that actually landed:
 ```
 | mcatalog values(metric_name) WHERE index=k8s_metrics
 ```
+
+### Sending Prometheus metrics (NKP's kube-prometheus-stack)
+
+NKP ships **kube-prometheus-stack** in namespace `kommander`: Prometheus (`v3.11.0`), `kube-state-metrics`,
+`node-exporter` (7 pods), `alertmanager`, `grafana`, `prometheus-operator`, plus **28 ServiceMonitors**.
+Those `ServiceMonitor`s are consumed by *that* Prometheus — the OTel collector does **not** read them.
+
+**Recommended: federate.** Point one OTel receiver at Prometheus's `/federate` endpoint, which returns
+the *current series* Prometheus already holds — including targets the collector could never scrape
+itself (etcd/apiserver mTLS, auth'd endpoints, node-exporter, KSM). No ServiceMonitor replication, no
+credentials to copy.
+
+**Run it in the cluster receiver, never the agent.** The agent is a DaemonSet (one pod per node) — it
+would scrape the same Prometheus on every node and duplicate every series N times. The cluster
+receiver is one pod per cluster. That is why the block lives under `clusterReceiver.config`.
+
+**Scope matters — NKP's Prometheus is big.** Measured on the lab (`/federate`, one scrape):
+
+| `match[]` selector | series | payload |
+|---|---|---|
+| *default* `{job=~"kommander.*\|nkp-.*\|opencost\|centralized-.*\|…",__name__!~".*_bucket"}` | ~18,000 | 9.5 MB |
+| `{__name__=~"kube_.*\|node_.*",__name__!~".*_bucket"}` | ~44,000 | 24 MB |
+| `{__name__!~".*_bucket"}` (all, no histograms) | ~192,000 | 99 MB |
+| `{__name__=~".+"}` (**everything**) | **~457,000** | **218 MB** |
+
+Splunk metrics are billed per datapoint, and "everything" is 218 MB **per scrape** — so the lab
+defaults to the NKP-platform scope (metrics you don't already get from `kubelet_stats` /
+`k8s_cluster`), ~18k series at one scrape/minute. Edit the `match[]` line in
+[`values.example.yaml`](values.example.yaml) to widen or narrow it (the selector lives in the file,
+not `local.env`, because `|`/quotes don't survive the placeholder renderer).
+
+```yaml
+clusterReceiver:
+  enabled: true
+  config:
+    receivers:
+      prometheus/nkp:
+        config:                      # <- schema: config.scrape_configs
+          scrape_configs:
+            - job_name: nkp-prometheus-federate
+              scrape_interval: 60s
+              scrape_timeout: 50s
+              metrics_path: /federate
+              params:
+                'match[]':
+                  - '{job=~"kommander.*|nkp-.*|opencost|centralized-.*|kubefed-.*|kubetunnel-.*|loggingstack-.*|dex-.*|kube-prometheus-stack-.*|karma|grafana-logging",__name__!~".*_bucket"}'
+              static_configs:
+                - targets: [kube-prometheus-stack-prometheus.kommander.svc:9090]
+    service:
+      pipelines:
+        metrics:
+          receivers: [k8s_cluster, prometheus/nkp]   # lists are REPLACED — keep k8s_cluster!
+  resources:                          # parsing tens of thousands of series needs headroom
+    requests: {cpu: 200m, memory: 512Mi}
+    limits:   {cpu: 1000m, memory: 1Gi}
+```
+
+> ⚠️ **Schema gotcha:** it is `config.scrape_configs`, **not** `config.config.scrape_configs`. The
+> doubled form only applies **inside `receiver_creator`** (where `config:` nests one more level); as a
+> standalone receiver it fails at startup with
+> `'config' prometheus receiver: … field config not found in type config.plain` (CrashLoopBackOff).
+
+**Verify:**
+
+```bash
+# the federation receiver must be accepting points (wait >1 scrape interval!)
+R=$(kubectl -n splunk-otel get pod -o name | grep cluster-receiver | cut -d/ -f2)
+kubectl -n splunk-otel port-forward pod/$R 18899:8899 &
+curl -s localhost:18899/metrics | grep 'prometheus/nkp' | grep -v '^#'
+#   otelcol_receiver_accepted_metric_points{receiver="prometheus/nkp"}  <growing>
+#   otelcol_exporter_send_failed_metric_points  -> absent/0
+
+# and in Splunk:
+| mcatalog values(metric_name) WHERE index=k8s_metrics | grep -v "k8s\." | head -40
+| mstats count WHERE index=k8s_metrics metric_name="kommander_*" span=1m
+```
+
+Observed on the lab: `prometheus/nkp` ≈ **73k points** in ~4 min, cluster receiver memory ≈ **477 MiB**
+(limit 1 GiB), **0** export failures.
+
+> Reached via the NKP platform playbook: `nkp-deployer/configure/splunk/GUIDE.md` §3.2.
+
 
 
 ---
@@ -306,7 +389,9 @@ index=k8s_logs sourcetype=kube:kernel   earliest=-15m | head 20
 | `HTTP 403 "Forbidden"` | wrong/rotated token in the running pod | fix the token, then `kubectl -n splunk-otel rollout restart ds/<release>-agent` |
 | `x509: certificate signed by unknown authority` | Splunk HEC cert is `SplunkCommonCA` | `splunkPlatform.insecureSkipVerify: true` |
 | `kubelet_stats` accepted **0**, but logs and other metrics are fine, **no** `Dropping data` | kubelet cert has **no IP SAN** | `agent.config.receivers.kubelet_stats.insecure_skip_verify: true` |
-| Metrics from an app / kube-state-metrics never appear | the collector does not scrape Prometheus targets by default | enable `autodetect.prometheus`, `agent.discovery`, or a manual `prometheus/*` receiver (see “How metrics are actually collected”) |
+| Metrics from an app / kube-state-metrics never appear | the collector does not scrape Prometheus targets by default | enable `autodetect.prometheus`, `agent.discovery`, or federation (see “Sending Prometheus metrics”) |
+| Cluster receiver **CrashLoopBackOff** with `field config not found in type config.plain` | `prometheus/*` receiver nested as `config.config.scrape_configs` | use `config.scrape_configs` (the doubled form is only for `receiver_creator`) |
+| `prometheus/nkp` accepted **0** points | scraped too early, or the `match[]`/target is wrong | wait >1 scrape interval; check `kubectl -n splunk-otel logs -l app=splunk-otel-collector \| grep -i scrape` |
 | `warn … failed to fetch container metrics … empty containerID` | a container (e.g. `kube-bench`/`pause`) exposes no containerID, so `container.id` enrichment is skipped | **benign** — ignore; the receiver keeps working |
 | `helm upgrade` error `minLength: got 0, want 1` | empty `splunkPlatform.index` | always set a real index (the schema has no “omit index” mode) |
 | `no matches for kind` / chart not found | repo not added/updated | `helm repo add … && helm repo update`; check `--version` |
