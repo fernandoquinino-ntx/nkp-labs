@@ -19,6 +19,7 @@ The manifests are **portable templates** (they use `${PLACEHOLDERS}`); you suppl
 | 06 | [06-long-lived-token-kubeconfig](06-long-lived-token-kubeconfig/) | a **long-lived ServiceAccount token** + a ready **kubeconfig** for an app/CI (least privilege) |
 | 07 | [07-velero-bsl](07-velero-bsl/) | configure a **Velero Backup Storage Location (BSL)** (UI + CLI), write **backup policies** (`Schedule`s), **back up & restore a persistent app** (volumes), + the Velero/NKP **CRDs** |
 | 08 | [08-splunk-otel-helm](08-splunk-otel-helm/) | install the **Splunk OpenTelemetry Collector** with **plain `helm`** (no catalog) — every setting explained, **logs + metrics** to Splunk over HEC, and **troubleshooting** |
+| 09 | [09-traefik-oidc-okta](09-traefik-oidc-okta/) | protect an app with **Okta OIDC** using the **Traefik OIDC plugin middleware** — a hands-on lab with a **page per step** (`steps/01…10`), no oauth2-proxy, no Dex |
 
 ## Procedures (step-by-step, copy-paste)
 
@@ -77,6 +78,13 @@ Prefer the raw commands? `./scripts/render.sh <lab>` writes `rendered/<lab>/` an
 | `SPLUNK_HEC_ENDPOINT` | Splunk HEC URL (lab 08) | `https://<stack>.splunkcloud.com:8088/services/collector/event` |
 | `SPLUNK_HEC_TOKEN` | **secret** HEC token (lab 08) — gitignored only | `<uuid>` |
 | `SPLUNK_INDEX` / `SPLUNK_METRICS_INDEX` | events / metrics indexes, both **token-allowed** (lab 08) | `k8s_logs` / `k8s_metrics` |
+| `OIDC_HOST` | app host label for the OIDC lab → `<OIDC_HOST>.<DOMAIN>` (lab 09) | `whoami` |
+| `TRAEFIK_NS` | namespace where Traefik runs (lab 09: the plugin override) | `kommander` |
+| `OIDC_PLUGIN_VERSION` | `traefikoidc` plugin version (lab 09) | `v1.0.36` |
+| `OKTA_ISSUER` | Okta OIDC issuer URL (lab 09) | `https://<org>.okta.com` |
+| `OKTA_CLIENT_ID` / `OKTA_CLIENT_SECRET` | Okta app credentials (lab 09) | `<id>` / `<secret>` (**secret**) |
+| `OIDC_SESSION_KEY` | cookie encryption key, ≥32 bytes (lab 09) | `openssl rand -base64 32` (**secret**) |
+| `OIDC_ALLOWED_DOMAINS` / `OIDC_ALLOWED_GROUPS` | authorization filters (lab 09) | `example.com` / `My-App-Users` |
 
 ## Layout
 

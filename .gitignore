@@ -16,6 +16,9 @@ kubeconfig-*
 bsl-cr.yaml
 schedule-cr.yaml
 appdeployment.yaml
+# lab 09 — filled-in OIDC manifests / artifacts
+secret.yaml
+cookies.txt
 
 # os / editor
 .DS_Store

@@ -1,0 +1,17 @@
+# ClusterIP Service in front of whoami. Traefik routes to it; nothing external here
+# (the app must NOT be exposed directly, or users could bypass authentication).
+apiVersion: v1
+kind: Service
+metadata:
+  name: whoami
+  namespace: ${NAMESPACE}
+  labels:
+    app: whoami
+spec:
+  type: ClusterIP
+  selector:
+    app: whoami
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

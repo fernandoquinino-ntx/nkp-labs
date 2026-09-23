@@ -1,0 +1,44 @@
+# The application we will PROTECT.
+#
+# `traefik/whoami` simply prints the request headers it received — which is exactly
+# what we want: once authentication works, you will SEE the identity the OIDC
+# middleware injected (X-Forwarded-User, X-User-Groups, X-Auth-Request-Redirect, ...).
+#
+# Any HTTP app works here; we only need it reachable on a ClusterIP Service.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whoami
+  namespace: ${NAMESPACE}
+  labels:
+    app: whoami
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: whoami
+  template:
+    metadata:
+      labels:
+        app: whoami
+    spec:
+      containers:
+        - name: whoami
+          image: traefik/whoami:v1.12.0
+          args: ["--port=80"]
+          ports:
+            - name: http
+              containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi

@@ -1,0 +1,35 @@
+# The route that Traefik watches. Attach the OIDC Middleware to it and every request
+# for the host must pass authentication first.
+#
+# NOTE: this IngressRoute is in the SAME namespace as the Middleware (${NAMESPACE}).
+# Traefik's CRD provider has `allowCrossNamespace: false` by default, so a route cannot
+# reference a Middleware in another namespace — the reference below would be silently
+# ignored and the route would be UNAUTHENTICATED (and Traefik logs "middleware not found").
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: whoami
+  namespace: ${NAMESPACE}
+  labels:
+    app.kubernetes.io/part-of: traefik-oidc-lab
+spec:
+  # WHY: `websecure` is the TLS entrypoint (the `web` entrypoint only redirects to it).
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`${OIDC_HOST}.${DOMAIN}`)
+      kind: Rule
+      # WHY: the routing does auth (oidc-auth) BEFORE it forwards to the Service.
+      middlewares:
+        - name: oidc-auth
+      services:
+        - name: whoami
+          port: 80
+  # WHY: empty `tls: {}` = Traefik's DEFAULT certificate. GOTCHA: on NKP that default is
+  #      often an IP-only cert (CN=traefik.localhost.localdomain, SAN=<LB-IP>), so a browser
+  #      will WARN for a DNS host. If a wildcard Secret exists (e.g. for
+  #      `*.apps.<cluster>.<domain>`) reference it — and it MUST be in THIS namespace
+  #      (Traefik TLS Secret refs are same-namespace only, like middlewares):
+  #   tls:
+  #     secretName: apps-default-tls
+  tls: {}

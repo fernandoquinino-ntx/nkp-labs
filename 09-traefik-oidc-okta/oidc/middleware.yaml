@@ -1,0 +1,71 @@
+# The Middleware that DOES the authentication.
+#
+# It is a Traefik PLUGIN middleware (not a built-in one): its handler comes from the
+# `traefikoidc` plugin you enable in step 03. Traefik reads `spec.plugin.<name>` and
+# hands the configuration to that plugin. EVERY field below has a `# WHY:` line —
+# reading them is the point of this lab.
+#
+# Same namespace as the protected route (step 07); Traefik CRD cross-namespace is OFF
+# by default.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: oidc-auth
+  namespace: ${NAMESPACE}
+  labels:
+    app.kubernetes.io/part-of: traefik-oidc-lab
+spec:
+  plugin:
+    traefikoidc:
+      # WHY: the OIDC issuer. Traefik discovers the endpoints from
+      #      <providerURL>/.well-known/openid-configuration. For an Okta *Org*
+      #      Authorization Server this is https://<org>.okta.com ; for a *custom*
+      #      Authorization Server it is https://<org>.okta.com/oauth2/<authServerId>.
+      #      It MUST match the `iss` of the tokens exactly (no trailing slash).
+      providerURL: "${OKTA_ISSUER}"
+
+      # WHY: identifies our app to Okta. Read from the Secret, not hardcoded.
+      #      `urn:k8s:secret:<secret-name>:<key>` is resolved by Traefik's Kubernetes
+      #      CRD provider, which reads the Secret from THIS Middleware's namespace.
+      #      So `okta-oidc` must exist in ${NAMESPACE} (see step 04).
+      clientID: urn:k8s:secret:okta-oidc:CLIENT_ID
+
+      # WHY: proves the client to Okta at the token endpoint — referenced, never inline.
+      clientSecret: urn:k8s:secret:okta-oidc:CLIENT_SECRET
+
+      # WHY: encrypts the browser session cookie. MUST be >= 32 bytes. Secrets are not
+      #      readable in a CR, so keep it in the Secret and reference it.
+      sessionEncryptionKey: urn:k8s:secret:okta-oidc:SESSION_KEY
+
+      # WHY: where Okta sends the browser back. A PATH here — the plugin builds the full
+      #      URL from the request host (https://<host>/oauth2/callback). This EXACT URL
+      #      must be registered as the Sign-in redirect URI on the Okta app (step 02).
+      callbackURL: /oauth2/callback
+
+      # WHY: RP-initiated logout path; the plugin serves it and redirects to Okta's
+      #      end_session endpoint.
+      logoutURL: /oauth2/logout
+      postLogoutRedirectURI: /
+
+      # WHY: AUTHORIZATION (not just authentication). Only these email domains may use
+      #      the app — a cheap first filter. Set to your org's domain(s).
+      allowedUserDomains:
+        - ${OIDC_ALLOWED_DOMAINS}
+
+      # WHY: group-based authorization. Requires a `groups` claim in the ID token
+      #      (add a Groups claim + the `groups` scope on the Okta app — step 02).
+      #      Uncomment and list the groups allowed to reach the app:
+      # allowedRolesAndGroups:
+      #   - ${OIDC_ALLOWED_GROUPS}
+      # groupClaimName: groups
+
+      # WHY: Okta only returns `groups` if we ask for the scope.
+      # scopes:
+      #   - groups
+
+      # WHY: forward only a minimal set of identity headers to the app (avoids HTTP 431
+      #      "request header too large" with big ID tokens).
+      minimalHeaders: true
+
+      # WHY: verbose logging while you learn; switch to `info` for normal use.
+      logLevel: info

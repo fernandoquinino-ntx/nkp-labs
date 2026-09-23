@@ -1,0 +1,38 @@
+# ConfigMap holding the AppDeployment override for the `traefik` platform app.
+#
+# Traefik plugins are STATIC configuration: Traefik downloads and loads them at STARTUP.
+# On NKP the Traefik Helm values are owned by the `traefik` AppDeployment, so you do not
+# `helm upgrade` directly — you add a `configOverrides` ConfigMap and let Kommander's
+# git-operator merge it into the release's HelmRelease (see lab 05).
+#
+# The Traefik Helm chart reads plugins from `experimental.plugins.<name>` and turns them
+# into Traefik's static `experimental.plugins` config. `<name>` HERE must equal the key
+# used under `spec.plugin.<name>` in the Middleware (`traefikoidc`).
+#
+# COPY -> traefik-plugin/overrides.yaml (or render it), apply it in the TRAEFIK namespace,
+# then point the AppDeployment at it:
+#
+#   kubectl -n "$TRAEFIK_NS" apply -f traefik-plugin/overrides.yaml
+#   kubectl -n "$TRAEFIK_NS" patch appdeployment traefik --type merge \
+#     -p '{"spec":{"configOverrides":{"name":"traefik-oidc-overrides"}}}'
+#
+# WHY the moduleName + version: Traefik fetches the module from the plugin registry
+# (https://plugins.traefik.io) at startup into /plugins-storage. The Traefik pod needs
+# EGRESS to the internet (or use experimental.localPlugins with a mounted directory for
+# air-gapped installs). Pick a version compatible with your Traefik release.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: traefik-oidc-overrides
+  namespace: ${TRAEFIK_NS}
+  labels:
+    app.kubernetes.io/part-of: traefik-oidc-lab
+data:
+  values.yaml: |
+    experimental:
+      # WHY: if the plugin fails to load, DON'T take Traefik down with it (default false).
+      abortOnPluginFailure: false
+      plugins:
+        traefikoidc:
+          moduleName: github.com/lukaszraczylo/traefikoidc
+          version: ${OIDC_PLUGIN_VERSION}

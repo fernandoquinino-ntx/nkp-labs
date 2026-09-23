@@ -1,0 +1,12 @@
+# The namespace where the demo app, the OIDC Middleware and the protected IngressRoute live.
+# (Same namespace for all three ON PURPOSE — see step 07: Traefik's CRD provider has
+#  allowCrossNamespace=false by default, so a Middleware can only attach to a route in
+#  ITS OWN namespace.)
+#
+# Already created by lab 00 in most setups; applying it again is a no-op.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${NAMESPACE}
+  labels:
+    app.kubernetes.io/part-of: traefik-oidc-lab
