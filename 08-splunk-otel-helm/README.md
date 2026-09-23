@@ -69,6 +69,7 @@ UI**, not with a script.
 | [`values.example.yaml`](values.example.yaml) | **the star** — annotated Helm values (every key has a `# WHY:`) |
 | [`DIAGRAMS.md`](DIAGRAMS.md) | Mermaid diagrams: install/configure flow, log + metric paths, precedence, troubleshooting flow |
 | [`OPERATIONAL-MODE.md`](OPERATIONAL-MODE.md) | **operating model**: what the collector pulls (receivers, targets, auth, intervals), processors, exporter guarantees, ports |
+| [`SUMMARY.md`](SUMMARY.md) | **slide-ready summary** for presenting this to newcomers (one `##` per slide + speaker notes) |
 | [`values-prometheus.example.yaml`](values-prometheus.example.yaml) | optional add-on values file: federate NKP's Prometheus (added by `install.sh --prometheus`) |
 | [`namespace.yaml`](namespace.yaml) | the namespace (`${OTEL_NAMESPACE}`) so `scripts/apply.sh`/`cleanup.sh` work |
 | [`install.sh`](install.sh) | render → `helm repo add` → `helm upgrade --install` (`--dry-run`, `--apply`, `--template`) |
