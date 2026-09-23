@@ -54,11 +54,14 @@ for f in "$NS_YAML" "$OVERRIDE" "$APPDEP"; do [ -f "$f" ] || { echo "render prod
 
 if [ "$MODE" = "dry-run" ]; then
   echo "== dry-run: would apply =="
-  echo "   [workload:${WORKLOAD_CLUSTER}] kubectl apply -f rendered/$LAB/namespace.yaml"
-  echo "   [mgmt:ns ${WORKSPACE_NS}]      kubectl apply -f rendered/$LAB/overrides/eso-overrides.example.yaml"
-  echo "   [mgmt:ns ${WORKSPACE_NS}]      kubectl apply --server-side -f rendered/$LAB/overrides/appdeployment.example.yaml"
+  echo "  [store]  [workload:${WORKLOAD_CLUSTER}] kubectl apply -f rendered/$LAB/namespace.yaml"
+  echo "  [store]  [mgmt:ns ${WORKSPACE_NS}]      kubectl apply -f rendered/$LAB/overrides/eso-overrides.example.yaml"
+  echo "  [store]  [mgmt:ns ${WORKSPACE_NS}]      kubectl apply --server-side -f rendered/$LAB/overrides/appdeployment.example.yaml"
+  echo "  [TEST ]  [workload:${WORKLOAD_CLUSTER}] kubectl apply -f rendered/$LAB/eso/externalsecret.example.yaml"
+  echo "  [TEST ]  [workload:${WORKLOAD_CLUSTER}] kubectl apply -f rendered/$LAB/app/deployment.yaml"
   echo
   echo "   (ensure VAULT_CA_BUNDLE is set — run scripts/fetch-vault-ca.sh first)"
+  echo "   [store] = the shared credential store;  [TEST] = a consumer to prove it works."
   echo "re-run with --apply to do it."
   exit 0
 fi
@@ -69,16 +72,21 @@ if [ -z "${VAULT_CA_BUNDLE:-}" ]; then
   echo "WARNING: VAULT_CA_BUNDLE is empty — run scripts/fetch-vault-ca.sh, else the store will be NotReady" >&2
 fi
 
-echo "== 1/3 demo namespace on the workload =="
+echo "== [store] 1/3 demo namespace on the target cluster =="
 KS apply -f "$NS_YAML"
 
-echo "== 2/3 override ConfigMap on the management cluster =="
+echo "== [store] 2/3 override ConfigMap (the ClusterSecretStore) on the management cluster =="
 K -n "$WORKSPACE_NS" apply -f "$OVERRIDE"
 
-echo "== 3/3 AppDeployment (installs ESO on ${WORKLOAD_CLUSTER} + points at the override) =="
+echo "== [store] 3/3 AppDeployment (installs ESO on ${WORKLOAD_CLUSTER} + points at the override) =="
 K -n "$WORKSPACE_NS" apply --server-side -f "$APPDEP"
 
+echo "== [TEST] consumer: ExternalSecret + demo Deployment (NOT part of the store) =="
+KS apply -f "$R/eso/externalsecret.example.yaml"
+KS apply -f "$R/app/deployment.yaml"
+
 echo
-echo "applied. watch it:"
+echo "applied (store). The consumer is TEST-side — replace it with your app's own ExternalSecret."
+echo "watch it:"
 echo "  kubectl --kubeconfig \$WORKLOAD_KUBECONFIG get clustersecretstore,externalsecret -A -w"
 echo "then: scripts/verify.sh"

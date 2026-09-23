@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # apply-raw.sh — OPTIONAL shortcut for Path B: apply the raw manifests (no AppDeployment override):
-# the ClusterSecretStore, the ExternalSecret and the demo Deployment, straight onto the workload.
+#   [store] the ClusterSecretStore              — the credential store, applied directly
+#   [TEST ] the ExternalSecret + demo Deployment — a consumer, to prove it works
 #
 # Use this to see the "CR" form side-by-side with the override form (Path A). Do NOT run both at once
 # (same object names).
@@ -30,7 +31,9 @@ for f in "${FILES[@]}"; do [ -f "$f" ] || { echo "render produced no $f" >&2; ex
 
 if [ "$MODE" = "dry-run" ]; then
   echo "== dry-run: would apply (Path B, raw) =="
-  printf '   %s\n' "${FILES[@]#"$ROOT"/}"
+  echo "  [store] $R/eso/clustersecretstore.example.yaml"
+  echo "  [TEST ] $R/eso/externalsecret.example.yaml"
+  echo "  [TEST ] $R/app/deployment.yaml"
   echo "re-run with --apply to do it."
   exit 0
 fi

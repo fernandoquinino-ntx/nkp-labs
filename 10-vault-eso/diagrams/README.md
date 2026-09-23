@@ -13,10 +13,13 @@ deck:
 
 ## 01 — Overview
 
+> The override carries **only the credential store** (`ClusterSecretStore`). The `ExternalSecret`,
+> `Secret` and demo app are the **consumer/test** side — applied separately.
+
 ```mermaid
 flowchart LR
   subgraph CFG["Configuration (NKP)"]
-    OVR["ConfigMap<br/>external-secrets-overrides<br/>values.yaml → extraObjects"]
+    OVR["ConfigMap<br/>external-secrets-overrides<br/>extraObjects → ClusterSecretStore"]
     AD["AppDeployment external-secrets<br/>configOverrides → OVR"]
     AD -- "Helm values" --> OVR
   end
@@ -36,11 +39,10 @@ flowchart LR
   end
 
   AD --> HR
-  HR -- "renders extraObjects" --> CSS
-  HR -- "renders extraObjects" --> ES
-  HR -- "renders extraObjects" --> APP
+  HR -- "renders extraObjects (the store ONLY)" --> CSS
   CSS -- "login (SA token)" --> AU
   CSS -- "read" --> KV
+  CONS["consumer / test side — applied separately"] -.-> ES
 ```
 
 ## 02 — How the override is wired

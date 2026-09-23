@@ -1,8 +1,11 @@
 # Step 05 — Set the Vault "credential store" via the AppDeployment override
 
-This is the heart of the lab: the `ClusterSecretStore` (+ the `ExternalSecret` + the demo) are written
-**as Helm values** in the ESO app's override ConfigMap, and the ESO chart renders them via
-**`extraObjects`**.
+This is the heart of the lab: the **`ClusterSecretStore`** — and *only* the store — is written **as a
+Helm value** in the ESO app's override ConfigMap, and the ESO chart renders it via **`extraObjects`**.
+
+> **Store vs consumer.** The store is *shared infrastructure* — define it once, here. The
+> `ExternalSecret` and the demo app are the **consumer/test** side (steps 06–07): an app creates its
+> own ExternalSecret referencing the store. They are **not** part of the AppDeployment.
 
 > Why not a plain `ClusterSecretStore` YAML? Because an `AppDeployment` can only feed **Helm values**.
 > `extraObjects` is the bridge: a list of manifests the chart renders (each through `tpl`) as part of
@@ -22,14 +25,14 @@ MG="kubectl --kubeconfig ~/dc1-nkp-cl01.conf"
 $MG -n "${WORKSPACE_NS:-datascience-xmfnz}" apply -f eso-overrides.yaml
 ```
 
-The three `extraObjects` entries are exactly the raw manifests in `eso/` and `app/` — compare them
-side by side; that is the "CR ⇄ override" contrast this lab is about:
+The single `extraObjects` entry is the store (raw equivalent: `eso/clustersecretstore.example.yaml`).
+The consumer objects are **applied separately** — they are not part of the AppDeployment:
 
-| `extraObjects` entry | raw file |
-|---|---|
-| `ClusterSecretStore/vault-backend` | `eso/clustersecretstore.example.yaml` |
-| `ExternalSecret/lab-app-credentials` | `eso/externalsecret.example.yaml` |
-| `Deployment/lab-eso-demo` | `app/deployment.yaml` |
+| Object | Where | Role |
+|---|---|---|
+| `ClusterSecretStore/vault-backend` | **in the override** (`extraObjects`) | the credential store (shared) |
+| `ExternalSecret/lab-app-credentials` | applied separately (`eso/externalsecret.example.yaml`) | consumer / test |
+| `Deployment/lab-eso-demo` | applied separately (`app/deployment.yaml`) | consumer / test |
 
 ## Point the AppDeployment at it
 

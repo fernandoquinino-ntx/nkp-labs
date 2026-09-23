@@ -1,5 +1,8 @@
-# AppDeployment — deploy the NKP-catalog ESO app to the WORKLOAD cluster, and point it at the
-# override ConfigMap (../overrides/eso-overrides.example.yaml).
+# AppDeployment — deploy the NKP-catalog ESO app to the target cluster, and point it at the override
+# ConfigMap (../overrides/eso-overrides.example.yaml) that defines the credential store.
+#
+# This AppDeployment carries ONLY the ClusterSecretStore (the component the platform owns). The
+# ExternalSecret + demo app are the consumer/test side, applied separately.
 #
 # Prefer the UI (Management Cluster Workspace ▸ Applications ▸ External Secrets Operator ▸ Enable ▸
 # select the workload cluster) — it creates this object for you and its overlay editor writes the

@@ -45,12 +45,17 @@ The three objects ESO deals with:
 cluster, a Vault running on the management cluster, and (for the *override* path) the ESO platform app
 enabled on the workload cluster.
 
-> **Two paths to the same result — do path A.**
+> **The store vs the consumer.** The AppDeployment override defines **only the credential store**
+> (the `ClusterSecretStore`) — shared infrastructure, set once as a Helm value (UI-visible). The
+> `ExternalSecret` + demo pod are the **consumer/test** side: any app that needs a secret creates its
+> own ExternalSecret referencing the store. This lab ships both so you can see the whole path.
+>
+> **Two ways to create the store — do path A.**
 > - **Path A — AppDeployment override (recommended, UI-visible).** Enable ESO from the catalog and put
->   the `ClusterSecretStore`/`ExternalSecret`/demo inside the override's `extraObjects`. The store is
->   set *in the UI*. This is the "end user overrides the credential store" story.
-> - **Path B — raw manifests.** Apply the CRs with `kubectl` (still valid, just not UI-driven). Kept
->   here so you can see exactly what path A renders.
+>   **only the `ClusterSecretStore`** inside the override's `extraObjects`. The store is set *in the UI*.
+>   This is the "end user overrides the credential store" story.
+> - **Path B — raw manifests.** Apply the `ClusterSecretStore` with `kubectl` (still valid, just not
+>   UI-driven). Kept here so you can see exactly what path A renders.
 
 ---
 
@@ -76,11 +81,11 @@ enabled on the workload cluster.
 | File | Object | Step |
 |---|---|---|
 | `namespace.yaml` | Namespace `${NAMESPACE}` | 01 |
-| `overrides/eso-overrides.example.yaml` | **ConfigMap `${ESO_OVERRIDES_CM}`** — `values.yaml` → `extraObjects` (the store + the ExternalSecret + the demo) | 05 |
+| `overrides/eso-overrides.example.yaml` | **ConfigMap `${ESO_OVERRIDES_CM}`** — `values.yaml` → `extraObjects` (**only the `ClusterSecretStore`**) | 05 |
 | `overrides/appdeployment.example.yaml` | `AppDeployment` — installs the ESO app on `${WORKLOAD_CLUSTER}` + points at the override | 05 |
-| `eso/clustersecretstore.example.yaml` | raw `ClusterSecretStore` (mirror of what the override renders) | 06 (path B) |
-| `eso/externalsecret.example.yaml` | raw `ExternalSecret` | 06 (path B) |
-| `app/deployment.yaml` | raw demo Deployment | 07 (path B) |
+| `eso/clustersecretstore.example.yaml` | raw `ClusterSecretStore` — the store, applied directly (path B) | 05–06 |
+| `eso/externalsecret.example.yaml` | raw `ExternalSecret` — **consumer/test** | 06 |
+| `app/deployment.yaml` | raw demo Deployment — **consumer/test** | 07 |
 | `vault/remote-auth.md` · `vault/kv-seed.md` · `vault/validate-in-vault-ui.md` | the Vault-side glue + how to check it in the Vault UI | 02–03, validate |
 | `diagrams/` | mermaid diagrams (+ standalone `.mmd`) of the whole flow, the override wiring, the pull sequence and per-cluster auth | all |
 | `scripts/install.sh` · `scripts/apply-raw.sh` · `scripts/verify.sh` · `scripts/uninstall.sh` · `scripts/fetch-vault-ca.sh` · `scripts/vault-remote-auth.sh` | optional shortcuts | 02–10 |

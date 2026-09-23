@@ -1,17 +1,22 @@
-# ESO AppDeployment OVERRIDE — the ConfigMap the NKP / Kommander UI reads & writes.
+# ESO AppDeployment OVERRIDE — defines ONLY the "credential store" (the ClusterSecretStore).
 #
 # ┌─ WHY A CONFIGMAP OF HELM VALUES? ────────────────────────────────────────────────────────────┐
 # │ An AppDeployment can only feed HELM VALUES to an app (it merges this ConfigMap into the app's  │
-# │ HelmRelease). A ClusterSecretStore is a CR, not a Helm value — so to make the "credential      │
-# │ store" settable from the UI it must be RENDERED BY THE APP'S CHART. The external-secrets chart │
-# │ supports `extraObjects:` (a list of extra manifests it renders, through `tpl`). We use it to  │
-# │ turn a plain values override into real objects: the store, the ExternalSecret and the demo.   │
+# │ HelmRelease). A ClusterSecretStore is a CR, not a Helm value — so to make the store settable   │
+# │ from the UI it must be RENDERED BY THE APP'S CHART. The external-secrets chart supports        │
+# │ `extraObjects:` (extra manifests it renders, through `tpl`). We use it for exactly one object: │
+# │ the ClusterSecretStore.                                                                        │
 # └──────────────────────────────────────────────────────────────────────────────────────────────┘
 #
-# COPY -> eso-overrides.yaml ; fill/edit ; apply in the WORKSPACE namespace BEFORE the AppDeployment:
+# The store is SHARED infrastructure: define it ONCE here, and every consumer just references it.
+# Anything a consumer pulls (the ExternalSecret, the app that mounts the Secret) is NOT part of the
+# store — it is the testing/consumer side (see ../eso/externalsecret.example.yaml +
+# ../app/deployment.yaml).
+#
+# COPY -> eso-overrides.yaml ; apply in the WORKSPACE namespace BEFORE the AppDeployment:
 #   kubectl -n ${WORKSPACE_NS} apply -f eso-overrides.yaml
 #
-# The Kommander controller merges it into the ESO HelmRelease on the WORKLOAD cluster:
+# The Kommander controller merges it into the ESO HelmRelease on the target cluster:
 #   HelmRelease.spec.valuesFrom = [ external-secrets-<ver>-config-defaults,
 #                                   external-secrets-overrides   <-- THIS ConfigMap (optional),
 #                                   external-secrets-cluster-overrides ]
@@ -25,9 +30,8 @@ metadata:
   namespace: ${WORKSPACE_NS}
 data:
   values.yaml: |
-    # Everything a consumer needs to override the Vault "credential store" lives here.
+    # Only the credential store lives here. Set the Vault connection once; consumers reuse it.
     extraObjects:
-      # 1) ── the credential store: ESO ⟷ Vault (connection + auth) ──────────────────────────────
       - apiVersion: external-secrets.io/v1
         kind: ClusterSecretStore
         metadata:
@@ -46,70 +50,3 @@ data:
                   serviceAccountRef:
                     name: ${ESO_SA}
                     namespace: ${ESO_NAMESPACE}
-
-      # 2) ── the pull request: Vault KV ⟶ a native Kubernetes Secret ────────────────────────────
-      - apiVersion: external-secrets.io/v1
-        kind: ExternalSecret
-        metadata:
-          name: ${EXTERNAL_SECRET_NAME}
-          namespace: ${NAMESPACE}
-        spec:
-          refreshInterval: 1h
-          secretStoreRef:
-            name: ${SECRETSTORE_NAME}
-            kind: ClusterSecretStore
-          target:
-            name: ${EXTERNAL_SECRET_NAME}
-            creationPolicy: Owner
-          data:
-            - secretKey: username
-              remoteRef: { key: ${VAULT_SECRET_PATH}, property: username }
-            - secretKey: password
-              remoteRef: { key: ${VAULT_SECRET_PATH}, property: password }
-
-      # 3) ── a demo consumer of the synced Secret (env + mounted file) ──────────────────────────
-      - apiVersion: apps/v1
-        kind: Deployment
-        metadata:
-          name: lab-eso-demo
-          namespace: ${NAMESPACE}
-          labels:
-            app: lab-eso-demo
-        spec:
-          replicas: 1
-          selector:
-            matchLabels:
-              app: lab-eso-demo
-          template:
-            metadata:
-              labels:
-                app: lab-eso-demo
-            spec:
-              containers:
-                - name: demo
-                  image: ${DEMO_IMAGE}
-                  env:
-                    - name: SECRET_USERNAME
-                      valueFrom:
-                        secretKeyRef: { name: ${EXTERNAL_SECRET_NAME}, key: username }
-                    - name: SECRET_PASSWORD
-                      valueFrom:
-                        secretKeyRef: { name: ${EXTERNAL_SECRET_NAME}, key: password }
-                  volumeMounts:
-                    - name: secret
-                      mountPath: /etc/eso
-                      readOnly: true
-                  command:
-                    - sh
-                    - -c
-                    - |
-                      echo "== from ENV =="
-                      echo "SECRET_USERNAME=$SECRET_USERNAME"
-                      echo "SECRET_PASSWORD=$SECRET_PASSWORD"
-                      echo "== from FILE /etc/eso =="
-                      for f in /etc/eso/*; do echo "$f = $(cat "$f")"; done
-                      sleep 100000
-              volumes:
-                - name: secret
-                  secret:
-                    secretName: ${EXTERNAL_SECRET_NAME}
