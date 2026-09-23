@@ -1,0 +1,11 @@
+# Lab 10 — namespace for the demo app and the synced Kubernetes Secret.
+#
+# ESO keeps its own controller objects in ${ESO_NAMESPACE} (external-secrets), and the
+# ClusterSecretStore is cluster-scoped — only the ExternalSecret, the Secret it produces and the
+# demo Deployment live here.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${NAMESPACE}
+  labels:
+    app.kubernetes.io/part-of: nkp-labs

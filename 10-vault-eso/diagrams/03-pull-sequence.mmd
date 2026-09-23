@@ -1,0 +1,12 @@
+sequenceDiagram
+  participant ESO as ESO (target cluster)
+  participant VA as Vault (mgmt)
+  participant K8S as Kubernetes API
+  ESO->>VA: POST auth/kubernetes-per-cluster/login  (ServiceAccount token)
+  VA->>K8S: TokenReview (reviewer SA)
+  K8S-->>VA: valid — SA name + namespace
+  VA-->>ESO: Vault client_token
+  ESO->>VA: GET secret/data/app-credentials
+  VA-->>ESO: username / password
+  ESO->>K8S: create/update Secret lab-app-credentials
+  Note over ESO,K8S: reconciled every refreshInterval (1h)

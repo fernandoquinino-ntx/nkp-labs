@@ -1,0 +1,8 @@
+flowchart TD
+  UI["NKP UI: Applications → Edit configuration"] --> CM
+  CLI["kubectl edit configmap"] --> CM
+  CM["ConfigMap [app]-overrides<br/>data.values.yaml"] --> ADI["AppDeploymentInstance"]
+  AD["AppDeployment.spec<br/>configOverrides.name<br/>clusterConfigOverrides[].configMapName"] --> ADI
+  ADI --> HR["HelmRelease.spec.valuesFrom"]
+  HR --> CHART["external-secrets chart"]
+  CHART -- "tpl-renders each extraObjects entry" --> OBJ["ClusterSecretStore + ExternalSecret + Deployment"]

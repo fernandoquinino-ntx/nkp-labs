@@ -1,0 +1,40 @@
+# AppDeployment — deploy the NKP-catalog ESO app to the WORKLOAD cluster, and point it at the
+# override ConfigMap (../overrides/eso-overrides.example.yaml).
+#
+# Prefer the UI (Management Cluster Workspace ▸ Applications ▸ External Secrets Operator ▸ Enable ▸
+# select the workload cluster) — it creates this object for you and its overlay editor writes the
+# same ConfigMap. This YAML is the CLI/reference path.
+#
+# COPY -> appdeployment.yaml ; fill the EDIT-ME values ; apply in the WORKSPACE namespace:
+#   kubectl -n ${WORKSPACE_NS} apply --server-side -f appdeployment.yaml
+apiVersion: apps.kommander.d2iq.io/v1alpha3
+kind: AppDeployment
+metadata:
+  name: ${ESO_APP_ID}                      # the app id, e.g. external-secrets
+  namespace: ${WORKSPACE_NS}               # the workload cluster's WORKSPACE namespace (NOT the cluster name)
+spec:
+  appRef:
+    kind: ClusterApp                       # ESO is a PLATFORM app (cluster-scoped ClusterApp)
+    appID: ${ESO_APP_ID}
+    name: ${ESO_CLUSTERAPP}                # e.g. external-secrets-2.3.0  (version from `kubectl get clusterapp`)
+  clusterSelector:
+    matchExpressions:
+      - key: kommander.d2iq.io/cluster-name
+        operator: In
+        values: ["${WORKLOAD_CLUSTER}"]    # e.g. ds-cluster01
+  # These two fields are what make the override VISIBLE in the AppDeployment / UI.
+  # The VALUES still live in the ConfigMap — the AppDeployment only holds the reference.
+  # (A platform-managed app may instead link the CM by convention via HelmRelease.spec.valuesFrom
+  #  -> then spec.configOverrides.name is EMPTY and nothing shows here, even though the CM applies.)
+  # Workspace-wide override (the UI-visible field):
+  configOverrides:
+    name: ${ESO_OVERRIDES_CM}
+  # Per-cluster override — the UI writes this too; keep both pointing at the SAME ConfigMap:
+  clusterConfigOverrides:
+    - appVersion: "${ESO_APP_VERSION}"
+      clusterSelector:
+        matchExpressions:
+          - key: kommander.d2iq.io/cluster-name
+            operator: In
+            values: ["${WORKLOAD_CLUSTER}"]
+      configMapName: ${ESO_OVERRIDES_CM}

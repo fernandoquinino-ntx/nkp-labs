@@ -1,0 +1,56 @@
+# A demo consumer that reads the ESO-synced Secret TWO ways:
+#   - as environment variables (already resolved into env by the kubelet), and
+#   - as a mounted file (a projected copy of the Secret).
+# It prints both and then sleeps, so you can read the values with `kubectl logs`.
+#
+# This is the RAW manifest (path B). The same Deployment is rendered by the AppDeployment override.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lab-eso-demo
+  namespace: ${NAMESPACE}
+  labels:
+    app: lab-eso-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lab-eso-demo
+  template:
+    metadata:
+      labels:
+        app: lab-eso-demo
+    spec:
+      containers:
+        - name: demo
+          image: ${DEMO_IMAGE}
+          env:
+            - name: SECRET_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: ${EXTERNAL_SECRET_NAME}
+                  key: username
+            - name: SECRET_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ${EXTERNAL_SECRET_NAME}
+                  key: password
+          volumeMounts:
+            - name: secret
+              mountPath: /etc/eso
+              readOnly: true
+          command:
+            - sh
+            - -c
+            - |
+              echo "== from ENV =="
+              echo "SECRET_USERNAME=$SECRET_USERNAME"
+              echo "SECRET_PASSWORD=$SECRET_PASSWORD"
+              echo "== from FILE /etc/eso =="
+              for f in /etc/eso/*; do echo "$f = $(cat "$f")"; done
+              echo "(sleeping — 'kubectl logs' any time)"
+              sleep 100000
+      volumes:
+        - name: secret
+          secret:
+            secretName: ${EXTERNAL_SECRET_NAME}

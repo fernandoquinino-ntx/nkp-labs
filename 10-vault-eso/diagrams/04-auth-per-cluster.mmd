@@ -1,0 +1,13 @@
+flowchart LR
+  subgraph W["Workload cluster (ds-cluster01)"]
+    SA["SA eso-vault<br/>ns external-secrets"]
+    REV["SA vault-auth<br/>+ system:auth-delegator"]
+  end
+  subgraph M["Vault (management cluster)"]
+    MNT["auth/kubernetes-ds-cluster01<br/>kubernetes_host = workload API"]
+    ROLE["role eso → policy eso-ds-cluster01"]
+    MNT --- ROLE
+  end
+  SA -- "login (token)" --> MNT
+  MNT -- "TokenReview" --> REV
+  X["auth/kubernetes (mgmt-bound)<br/>rejects workload tokens"] -.-> MNT
