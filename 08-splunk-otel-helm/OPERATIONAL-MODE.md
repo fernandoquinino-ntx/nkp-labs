@@ -36,7 +36,7 @@ pull source ──► receiver ──► processors (memory_limiter, k8s_attribu
 |---|---|---|
 | Replicas | **one pod per node** | **one pod per cluster** |
 | Why | its sources are **node-local** (that node's logs, kernel, journal, kubelet) | its source is the **Kubernetes API**, which is cluster-wide — one pod sees everything, per-node pods would duplicate |
-| Runs | 7 pods on `dc1-nkp-cl01` | 1 pod |
+| Runs | one pod per node | one pod per cluster |
 
 The agent runs with `hostNetwork: true`, which is how it reaches the node's kubelet at
 `https://<nodeIP>:10250`.

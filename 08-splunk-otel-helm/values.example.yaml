@@ -27,9 +27,9 @@
 # WHAT    : a label attached to EVERY log record and metric as `k8s.cluster.name`,
 #           injected via the chart's own `resource/add_cluster_name` processor.
 # DEFAULT : ""  (empty)
-# OURS    : ${SPLUNK_CLUSTER_NAME}   e.g. dc1-nkp-cl01
+# OURS    : ${SPLUNK_CLUSTER_NAME}   e.g. my-cluster
 # WHY     : you need it to tell clusters apart in one Splunk index:
-#             index=k8s_logs k8s.cluster.name=dc1-nkp-cl01
+#             index=k8s_logs k8s.cluster.name=my-cluster
 #           Without it, several clusters look like one confusing stream.
 # BREAKS  : the chart's values.schema.json requires a NON-EMPTY string, so "" (or
 #           omitting it) fails `helm template/upgrade` with a schema error. Two

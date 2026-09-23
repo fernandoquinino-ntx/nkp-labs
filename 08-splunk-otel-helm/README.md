@@ -133,8 +133,8 @@ The variables this lab uses:
 | `OTEL_NAMESPACE` | `splunk-otel` | where the collector runs |
 | `OTEL_RELEASE` | `splunk-otel-collector` | the Helm release name |
 | `CHART_VERSION` | `0.160.0` | **pin** the chart version |
-| `SPLUNK_CLUSTER_NAME` | `dc1-nkp-cl01` | becomes `k8s.cluster.name`; **must be unique per cluster** |
-| `SPLUNK_HEC_ENDPOINT` | `https://prd-p-xxxxx.splunkcloud.com:8088/services/collector/event` | the HEC URL |
+| `SPLUNK_CLUSTER_NAME` | `<your-cluster-name>` | becomes `k8s.cluster.name`; **must be unique per cluster** |
+| `SPLUNK_HEC_ENDPOINT` | `https://<your-stack>.splunkcloud.com:8088/services/collector/event` | the HEC URL |
 | `SPLUNK_HEC_TOKEN` | `<hec-token>` | **secret** — lives only in `local.env` (gitignored) |
 | `SPLUNK_INDEX` | `k8s_logs` | events index — **must be token-allowed** |
 | `SPLUNK_METRICS_INDEX` | `k8s_metrics` | metrics index — **must be token-allowed** |
