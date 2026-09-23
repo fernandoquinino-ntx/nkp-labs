@@ -1,122 +1,258 @@
 # =============================================================================
 # values.example.yaml — Splunk OpenTelemetry Collector for Kubernetes
 # =============================================================================
-# This is the Helm values file for the SPLUNK OTEL COLLECTOR chart
-#   repo : https://signalfx.github.io/splunk-otel-collector-chart
-#   chart: splunk-otel-collector
+# Helm values for chart `splunk-otel-collector` (repo: signalfx/splunk-otel-collector-chart)
+# This lab pins chart version 0.160.0 (see CHART_VERSION in local.env).
 #
 # HOW TO USE (see the lab README):
-#   cp ../local.env.example ../local.env     # then edit it
-#   ../scripts/render.sh 08-splunk-otel-helm # substitutes the ${...} placeholders
-#   helm -n "$OTEL_NAMESPACE" upgrade --install "$OTEL_RELEASE" \
-#        splunk-otel-collector-chart/splunk-otel-collector \
-#        -f ../rendered/08-splunk-otel-helm/values.example.yaml
+#   cp ../local.env.example ../local.env      # then edit it
+#   ../scripts/render.sh 08-splunk-otel-helm  # substitutes the ${...} placeholders
+#   ./08-splunk-otel-helm/install.sh --apply [--prometheus]
 #
-# EVERY key below has a "# WHY:" line — read them, that is the point of this lab.
-# The ${...} tokens are replaced from local.env; the token never lives in git.
+# HOW TO READ THIS FILE — every key carries a small block:
+#   WHAT    : what the value actually does
+#   DEFAULT : the chart's own default (chart 0.160.0) if you did not set it
+#   OURS    : what this lab sets
+#   WHY     : why we set it (or why we leave the default)
+#   BREAKS  : what goes wrong when it is missing/incorrect
+#
+# The ${...} tokens are substituted from local.env; the HEC token therefore never
+# lives in git. At the bottom there is a section for the chart defaults we RELY ON
+# without setting them — read that too.
 # =============================================================================
 
-# -----------------------------------------------------------------------------
-# clusterName
-# -----------------------------------------------------------------------------
-# WHY: this value is attached to every log record and metric as `k8s.cluster.name`.
-#      With more than one cluster sending to the same Splunk stack you filter
-#      with it (`index=k8s_logs k8s.cluster.name=<x>`). Two clusters sharing a
-#      name look like one confusing stream.
-# WHY: the chart's values.schema.json requires this to be NON-EMPTY, so "" fails
-#      validation; always set a real, unique value.
+# =============================================================================
+# 1. clusterName
+# =============================================================================
+# WHAT    : a label attached to EVERY log record and metric as `k8s.cluster.name`,
+#           injected via the chart's own `resource/add_cluster_name` processor.
+# DEFAULT : ""  (empty)
+# OURS    : ${SPLUNK_CLUSTER_NAME}   e.g. dc1-nkp-cl01
+# WHY     : you need it to tell clusters apart in one Splunk index:
+#             index=k8s_logs k8s.cluster.name=dc1-nkp-cl01
+#           Without it, several clusters look like one confusing stream.
+# BREAKS  : the chart's values.schema.json requires a NON-EMPTY string, so "" (or
+#           omitting it) fails `helm template/upgrade` with a schema error. Two
+#           clusters that share the same name produce an indistinguishable stream.
 clusterName: "${SPLUNK_CLUSTER_NAME}"
 
-# -----------------------------------------------------------------------------
-# splunkPlatform — where and how data is sent (Splunk's HTTP Event Collector)
-# -----------------------------------------------------------------------------
+# =============================================================================
+# 2. splunkPlatform — where data is sent and how it is authenticated
+# =============================================================================
+# This block configures the HEC **exporter** (splunk_hec) used by every pipeline.
 splunkPlatform:
-  # WHY: HEC endpoint = https://<stack>.splunkcloud.com:8088/services/collector/event
-  #      (Splunk Cloud always uses :8088; on-prem is often :8088 too).
+
+  # ── endpoint ───────────────────────────────────────────────────────────────
+  # WHAT    : the HTTP Event Collector URL that data is POSTed to.
+  # DEFAULT : ""  (empty — you MUST set it, there is no sensible default)
+  # OURS    : ${SPLUNK_HEC_ENDPOINT}
+  #           https://<stack>.splunkcloud.com:8088/services/collector/event
+  # WHY     : Splunk Cloud always exposes HEC on TCP 8088 with the path
+  #           /services/collector/event. On-prem Splunk is usually the same shape.
+  # BREAKS  : empty → the collector refuses to start / schema error. Wrong host or
+  #           port → connection errors and 100% export failure (data dropped).
   endpoint: "${SPLUNK_HEC_ENDPOINT}"
 
-  # WHY: the HEC token authenticates every request. We render it from local.env
-  #      so it is NOT committed. You can also omit it here and pass
-  #      --set-string splunkPlatform.token=... on the helm command line.
-  # WHY: the chart CREATES a Kubernetes Secret from this value (secret.create=true)
-  #      and injects it into the pods as an env var.
+  # ── token ──────────────────────────────────────────────────────────────────
+  # WHAT    : the HEC token, sent as the `Authorization: Splunk <token>` header.
+  # DEFAULT : ""  (empty)
+  # OURS    : ${SPLUNK_HEC_TOKEN}  (rendered from the gitignored local.env)
+  # WHY     : it authenticates every request. We keep it OUT of git by rendering
+  #           it at install time; you can also drop it here and pass
+  #           `--set-string splunkPlatform.token=...` on the helm command line.
+  #           The chart writes this value into a Kubernetes Secret (secret.create,
+  #           default true) and injects it into the pods as an env var.
+  # BREAKS  : wrong/rotated token → HTTP 401/403, everything dropped (and the pods
+  #           keep their OLD env until restarted: `kubectl rollout restart ds/...`).
   token: "${SPLUNK_HEC_TOKEN}"
 
-  # WHY: the EVENTS index where logs land. TWO hard rules:
-  #        1) the value must be NON-EMPTY (chart schema minLength 1), and
-  #        2) it MUST be on the HEC token's "Selected Allowed Indexes".
-  #      If it is not allowed, Splunk answers HTTP 400 "Incorrect index" and the
-  #      collector SILENTLY drops every event (pods still look Ready).
+  # ── index ──────────────────────────────────────────────────────────────────
+  # WHAT    : the **events** index where LOG records are written.
+  # DEFAULT : "main"
+  # OURS    : ${SPLUNK_INDEX}   e.g. k8s_logs
+  # WHY     : your own index keeps the lab data separate and avoids token limits on
+  #           `main`. TWO hard rules: the value must be NON-EMPTY (schema
+  #           minLength=1) and it MUST be on the HEC token's "Selected Allowed
+  #           Indexes" (Splunk UI → Settings → Data inputs → HEC → token).
+  # BREAKS  : an index the token does not allow → HTTP 400 "Incorrect index" and
+  #           the collector SILENTLY drops every event (pods still look Ready).
   index: "${SPLUNK_INDEX}"
 
-  # WHY: metrics CANNOT go to an events index. Splunk has a separate index type
-  #      ("metrics"). Set metricsEnabled + a metrics-type index to ship metrics.
-  #      The same allowed-index rule applies to metricsIndex.
+  # ── metricsEnabled ─────────────────────────────────────────────────────────
+  # WHAT    : master switch for exporting METRICS to Splunk Platform.
+  # DEFAULT : false
+  # OURS    : true
+  # WHY     : this lab demonstrates logs AND metrics (host + kubelet + cluster).
+  #           Enabling it turns on the metrics pipelines and the cluster receiver.
+  # BREAKS  : without it, no metrics are exported at all (logs still work).
   metricsEnabled: true
+
+  # ── metricsIndex ───────────────────────────────────────────────────────────
+  # WHAT    : the **metrics-type** index metrics are written to.
+  # DEFAULT : ""   (empty — schema requires a value when metricsEnabled is true)
+  # OURS    : ${SPLUNK_METRICS_INDEX}   e.g. k8s_metrics
+  # WHY     : Splunk has two index TYPES (events vs metrics); numeric metrics must
+  #           land in a metrics-type index. It is a DIFFERENT index from `index`.
+  #           Same rule as `index`: it must be token-allowed.
+  # BREAKS  : empty → helm schema error. Not allowed by the token → HTTP 400 and
+  #           100% metric drop (same silent failure as logs).
   metricsIndex: "${SPLUNK_METRICS_INDEX}"
 
-  # WHY: identifies where data came from inside Splunk (a field, not the index).
+  # ── source ─────────────────────────────────────────────────────────────────
+  # WHAT    : the value of the `source` metadata field on every event.
+  # DEFAULT : "kubernetes"
+  # OURS    : kubernetes   (same as default — set explicitly for readability)
+  # WHY     : `source` is a searchable field in Splunk (not the index). Keeping the
+  #           default documents where the data came from.
+  # BREAKS  : nothing functional; it is metadata.
   source: kubernetes
 
-  # WHY: the Splunk Cloud trial HEC certificate is CN=SplunkServerDefaultCert,
-  #      issued by "SplunkCommonCA", which is NOT in the public trust store, so
-  #      strict TLS fails everywhere ("x509: certificate signed by unknown
-  #      authority"). true = accept it. PRODUCTION: instead install the
-  #      SplunkCommonCA chain into the collector's trust store.
+  # ── insecureSkipVerify ─────────────────────────────────────────────────────
+  # WHAT    : skip TLS certificate verification toward the HEC endpoint.
+  # DEFAULT : false  (verify!)
+  # OURS    : true
+  # WHY     : the Splunk Cloud trial HEC presents CN=SplunkServerDefaultCert issued
+  #           by SplunkCommonCA, which is NOT in the public trust store, so strict
+  #           verification fails everywhere:
+  #             x509: certificate signed by unknown authority
+  #           PRODUCTION ALTERNATIVE: install the SplunkCommonCA chain into the
+  #           collector's trust store (or the cluster trust bundle) instead.
+  # BREAKS  : leaving it false against Splunk Cloud → every export fails TLS.
   insecureSkipVerify: true
 
-  # WHY: explicit toggles so the intent is obvious (logs on, traces off).
+  # ── logsEnabled / tracesEnabled ────────────────────────────────────────────
+  # WHAT    : per-signal master switches (logs / traces).
+  # DEFAULT : logsEnabled true, tracesEnabled false
+  # OURS    : logsEnabled true, tracesEnabled false   (same as default)
+  # WHY     : set explicitly so the intent of this lab is obvious: logs + metrics,
+  #           no traces (we do not run a tracing backend).
+  # BREAKS  : logsEnabled false would disable all log pipelines.
   logsEnabled: true
   tracesEnabled: false
 
-# -----------------------------------------------------------------------------
-# logsCollection — WHICH logs to read and WHERE
-# -----------------------------------------------------------------------------
+# =============================================================================
+# 3. logsCollection — WHICH logs to read, and from where
+# =============================================================================
 logsCollection:
-  # WHY: container stdout/stderr. The collector tails /var/log/pods/*/*/*.log
-  #      (the same data NKP's logging-operator Fluent Bit reads and sends to Loki).
+
+  # ── containers ─────────────────────────────────────────────────────────────
+  # WHAT    : collect container stdout/stderr by tailing the node's pod log files
+  #           (/var/log/pods/*/*/*.log, CRI/docker aware).
+  # DEFAULT : enabled: true
+  # OURS    : enabled: true   (same as default)
+  # WHY     : this is the same data NKP's logging-operator Fluent Bit ships to
+  #           Loki — we dual-ship it to Splunk.
+  # BREAKS  : enabled: false → no application/container logs at all.
   containers:
     enabled: true
 
-  # WHY: HOST logs live in systemd-journald, NOT in files. The chart can build a
-  #      journald receiver, but ONLY one per listed unit — there is NO "all units"
-  #      mode. Listing 5 units (kubelet, sshd, …) would silently miss every other
-  #      host service AND kernel messages.
-  # HOW: keep `units: []` (nothing for the chart to build) and add ONE catch-all
-  #      receiver named `journald/all` under agent.config below, wired into the
-  #      `logs/host` pipeline. That reproduces NKP's host Fluent Bit, which reads
-  #      the whole journal plus /dev/kmsg.
+  # ── journald (host logs) ───────────────────────────────────────────────────
   journald:
+    # WHAT    : let the chart build journald receiver(s) for host logs.
+    # DEFAULT : enabled: false
+    # OURS    : enabled: true
+    # WHY     : host logs (kubelet, kernel, sshd, …) live in systemd-journald, not
+    #           in files. NKP's standalone host Fluent Bit reads the whole journal.
+    # BREAKS  : false → no host logs at all.
     enabled: true
+
+    # WHAT    : the host journal directory mounted into the agent.
+    # DEFAULT : /run/log/journal   (VOLATILE storage — lost on reboot)
+    # OURS    : /var/log/journal   (PERSISTENT storage)
+    # WHY     : this cluster persists the journal in /var/log/journal; pointing at
+    #           the default /run/log/journal would read nothing (empty/absent).
+    #           Verify on a node with: ls -d /var/log/journal
+    # BREAKS  : wrong directory → journald receiver finds no entries (0 host logs)
+    #           yet the pod looks healthy.
     directory: /var/log/journal
+
+    # WHAT    : which systemd units the chart's per-unit receivers should watch.
+    #           NOTE: the chart builds ONE receiver PER LISTED UNIT — it has NO
+    #           "all units" mode.
+    # DEFAULT : [kubelet, docker, containerd]
+    # OURS    : []   (empty — deliberately)
+    # WHY     : an empty list makes the chart build nothing, and we add a single
+    #           catch-all `journald/all` receiver under agent.config instead. A
+    #           3-or-5 unit list would SILENTLY miss every other host service AND
+    #           all kernel messages.
+    # BREAKS  : listing a few units = partial coverage that looks fine (no errors).
     units: []
 
-  # WHY: Kubernetes API-server audit logs are plain files on the control-plane
-  #      nodes. NKP's host Fluent Bit tails them; so do we.
-  # WHY: the map KEY *is* the receiver name, and the chart renamed `filelog` ->
-  #      `file_log`, so the key MUST be `file_log/nkp-audit` (the chart's own
-  #      validator rejects the legacy `filelog/...` name inside agent.config).
+  # ── extraFileLogs (files the chart knows nothing about) ────────────────────
+  # WHAT    : a map of filelog receivers, tailed by the agent DaemonSet. The map
+  #           KEY **is the receiver name** (it appears verbatim in the config and
+  #           in the logs/host pipeline).
+  # DEFAULT : {}   (none)
+  # OURS    : one receiver `file_log/nkp-audit` for the Kubernetes API audit log.
+  # WHY     : kube-apiserver audit logs are plain files on the control-plane nodes;
+  #           NKP's host Fluent Bit tails them, and so do we.
+  #           The `file_log/` prefix matters: the chart RENAMED the filelog
+  #           receiver to `file_log`, and its validator rejects the legacy
+  #           `filelog/...` name (in agent.config). The key must match.
   extraFileLogs:
     file_log/nkp-audit:
+
+      # WHAT    : glob(s) of files to tail.
+      # DEFAULT : (none — you must set it per receiver)
+      # OURS    : the API-server audit logs.
+      # WHY     : this is the same path NKP's host Fluent Bit uses.
+      # BREAKS  : wrong path → receiver starts but reads nothing.
       include:
         - /var/log/kubernetes/audit/*.log
+
+      # WHAT    : where to start reading a file when it is first seen.
+      # DEFAULT : end
+      # OURS    : end
+      # WHY     : we do not want to re-ingest (and pay for) the entire historical
+      #           audit file on every collector restart; `beginning` would.
+      # BREAKS  : `beginning` → a flood of old events at first start.
       start_at: end
+
+      # WHAT    : attach the file path / file name to each record.
+      # DEFAULT : include_file_name true, include_file_path false
+      # OURS    : path true, name false
+      # WHY     : the full path is useful metadata (and feeds com.splunk.source);
+      #           the bare filename duplicates it.
       include_file_path: true
       include_file_name: false
+
+      # WHAT    : static resource attributes added to every record from this file.
       resource:
+        # WHAT : Splunk `source` metadata field for these events.
+        # WHY  : lets you search a specific source in Splunk.
         com.splunk.source: /var/log/kubernetes/audit
-        # WHY: a sourcetype makes the audit events searchable/parsed in Splunk.
+        # WHAT : Splunk `sourcetype` (how Splunk parses/timestamps the event).
+        # WHY  : a dedicated sourcetype makes audit events searchable/parsed as
+        #        audit data: sourcetype=kube:apiserver-audit
+        # BREAKS: without it, events fall under the generic sourcetype.
         com.splunk.sourcetype: kube:apiserver-audit
+        # WHAT : which node produced the event.
+        # WHY  : env("K8S_NODE_NAME") is injected by the chart from the pod's
+        #        spec.nodeName; EXPR(...) is an OpenTelemetry expression.
         host.name: 'EXPR(env("K8S_NODE_NAME"))'
 
-# -----------------------------------------------------------------------------
-# agent — the per-node DaemonSet (reads node-local sources)
-# -----------------------------------------------------------------------------
+# =============================================================================
+# 4. agent — the per-node DaemonSet (reads node-LOCAL sources)
+# =============================================================================
 agent:
+
+  # WHAT    : deploy the collector as a DaemonSet (one pod per node).
+  # DEFAULT : true
+  # OURS    : true
+  # WHY     : container logs, the journal, audit files, host metrics and the
+  #           kubelet are all node-local — they must be read on every node.
+  # BREAKS  : false → no node-local logs/metrics at all.
   enabled: true
 
-  # WHY: extraReceivers come from the node filesystem. The audit directory does
-  #      not exist on every node, so mount it DirectoryOrCreate to avoid crashes.
+  # ── extraVolumes / extraVolumeMounts ───────────────────────────────────────
+  # WHAT    : extra hostPath volumes to mount into the agent pod.
+  # DEFAULT : []   (the chart already mounts the journal, /var/log/pods, etc.)
+  # OURS    : the audit directory.
+  # WHY     : the audit directory does not exist on worker nodes; type
+  #           DirectoryOrCreate makes kubelet create it instead of failing the
+  #           pod (otherwise the DaemonSet cannot mount on workers).
+  # BREAKS  : missing/incorrect mount → the file_log/nkp-audit receiver reads
+  #           nothing (or the pod fails to start with a mount error).
   extraVolumes:
     - name: nkp-audit
       hostPath:
@@ -126,60 +262,110 @@ agent:
     - name: nkp-audit
       mountPath: /var/log/kubernetes/audit
 
-  # WHY: `agent.config` is a FULL OpenTelemetry config that is merged OVER the
-  #      chart defaults. We use it for two things the chart cannot express:
-  #        (1) the catch-all `journald/all` host receiver, and
-  #        (2) the kubelet TLS fix.
+  # ── config (raw OpenTelemetry config, merged ON TOP of the chart's) ────────
+  # WHAT    : full OTel collector config for the agent. The chart generates a
+  #           DEFAULT config from its templates and then does a deep MERGE with
+  #           this block (mustMergeOverwrite): maps merge, LISTS ARE REPLACED.
+  # DEFAULT : {}   (chart defaults from templates/config/_otel-agent.tpl)
+  # OURS    : two things the chart cannot express —
+  #             (1) a catch-all journald receiver, and
+  #             (2) the kubelet TLS fix.
+  # WHY     : the chart has no "all units" journald option and no value for the
+  #           kubelet insecure flag.
   config:
     receivers:
-      # WHY: the kubelet (cAdvisor) metrics endpoint https://<nodeIP>:10250 uses a
-      #      serving certificate with NO IP SAN, so the pod's service-account CA
-      #      cannot validate it:
-      #        x509: cannot validate certificate for <IP> because it doesn't
-      #        contain any IP SANs
-      #      The receiver then produces ZERO points and logs NO "Dropping data"
-      #      (the failure is at scrape time) — it hides behind a healthy-looking
-      #      collector. insecure_skip_verify: true is the documented fix.
-      #      ALTERNATIVE: provide the kubelet CA with `ca_file`.
+
+      # ── kubelet_stats.insecure_skip_verify ─────────────────────────────────
+      # WHAT    : TLS verification for the kubelet metrics scrape.
+      # DEFAULT : (not set → verify the kubelet serving certificate)
+      # OURS    : true
+      # WHY     : the kubelet endpoint is https://<nodeIP>:10250 and its serving
+      #           certificate has NO IP SAN, so the pod's service-account CA
+      #           cannot validate it:
+      #             x509: cannot validate certificate for <IP> because it
+      #             doesn't contain any IP SANs
+      #           With verification on, the receiver produces ZERO points and logs
+      #           NO "Dropping data" (it fails at SCRAPE time, not export time).
+      #           ALTERNATIVE (stricter): supply the kubelet CA via `ca_file`.
+      # BREAKS  : no kubelet/pod/container usage metrics, with all-green pods.
       kubelet_stats:
         insecure_skip_verify: true
 
-      # WHY: one receiver, NO units/identifiers/matches => read the WHOLE journal
-      #      (all systemd units + kernel entries). This is the host-log parity
-      #      with NKP's standalone Fluent Bit.
+      # ── journald/all (the catch-all host-log receiver) ─────────────────────
+      # WHAT    : read the host journal. The receiver key `journald/all` is a name
+      #           we choose; the part before the slash is the receiver type.
+      # DEFAULT : (the chart builds only journald/<unit> receivers from
+      #           logsCollection.journald.units — which we left empty)
+      # OURS    : one receiver with NO units/identifiers/matches filter.
+      # WHY     : with no filter the journald receiver reads the WHOLE journal:
+      #           every systemd unit AND kernel messages. That is the host-log
+      #           parity with NKP's standalone Fluent Bit.
+      # BREAKS  : n/a — but if you later re-add `units:` under logsCollection, you
+      #           would double-collect those units (chart receiver + this one).
       journald/all:
+
+        # WHAT : host journal directory (same reasoning as logsCollection above).
+        # WHY  : persistent storage path on this cluster.
         directory: /var/log/journal
+
+        # WHAT : minimum journal priority to keep (syslog levels).
+        # DEFAULT: (unset = all priorities, 0..7)
+        # OURS : info (6) → drops debug(7) noise.
+        # WHY  : debug messages are high volume / low value.
+        # BREAKS: "debug" would roughly double host-log volume.
         priority: info
+
+        # WHAT : retry the journal read on transient failures.
+        # OURS : enabled: true
+        # WHY  : journal rotation / temporary read errors should not lose data.
         retry_on_failure:
           enabled: true
+
+        # WHAT : persist the read position (checkpoint) so a restart does not
+        #        re-read or skip entries.
+        # OURS : file_storage (the chart's `file_storage` extension writes to
+        #        /var/addon/splunk/otel_pos).
+        # WHY  : exactly-once-ish behaviour across restarts.
         storage: file_storage
+
+        # WHAT : stanza "operators" — a pipeline that rewrites each journal entry
+        #        into fields Splunk understands.
         operators:
+          # Splunk `source` metadata field.
           - type: add
             field: resource["com.splunk.source"]
             value: /var/log/journal
-          # WHY: sourcetype per unit (kube:journald:sshd, …); kernel has no unit.
+          # sourcetype per systemd unit, e.g. kube:journald:sshd.
+          # `if:` is an OTTL condition: only apply when the unit is present
+          # (kernel messages have no _SYSTEMD_UNIT).
           - type: add
             field: resource["com.splunk.sourcetype"]
             value: 'EXPR("kube:journald:"+body._SYSTEMD_UNIT)'
             if: 'body._SYSTEMD_UNIT != nil'
+          # kernel messages have no unit → give them their own sourcetype.
           - type: add
             field: resource["com.splunk.sourcetype"]
             value: kube:kernel
             if: 'body._SYSTEMD_UNIT == nil'
+          # Route host logs to the events index (per-record override). Keeping it
+          # here means this pipeline works even if splunkPlatform.index changes.
           - type: add
             field: resource["com.splunk.index"]
             value: "${SPLUNK_INDEX}"
+          # Which node wrote the entry (env var injected by the chart).
           - type: add
             field: resource["host.name"]
             value: 'EXPR(env("K8S_NODE_NAME"))'
+          # Expose the numeric syslog priority as a field (searchable).
           - type: add
             field: resource["journald.priority.number"]
             value: 'EXPR(body.PRIORITY)'
+          # Expose the unit name as a field as well.
           - type: add
             field: resource["journald.unit.name"]
             value: 'EXPR(body._SYSTEMD_UNIT)'
-          # WHY: move the message text into the log body (json parsers otherwise
-          #      keep it buried in a MESSAGE field).
+          # Move the human-readable message into the log body so Splunk indexes the
+          # text (journald otherwise keeps it under a MESSAGE field).
           - type: move
             id: set-body
             from: body.MESSAGE
@@ -187,15 +373,28 @@ agent:
 
     service:
       pipelines:
-        # WHY: attaching the catch-all receiver to the `logs/host` pipeline.
-        #      NOTE: list fields are REPLACED, not merged — so the audit receiver
-        #      must be listed here explicitly.
+        # ── logs/host.receivers ────────────────────────────────────────────────
+        # WHAT    : the list of receivers feeding the chart's `logs/host` pipeline.
+        # DEFAULT : [ file_log/nkp-audit, journald/<each unit> ]  (chart-built)
+        # OURS    : [ file_log/nkp-audit, journald/all ]
+        # WHY     : we must RE-STATE the pipeline because LISTS ARE REPLACED during
+        #           the merge — anything omitted here is detached from the pipeline
+        #           (and an unused receiver can even fail config validation).
+        # BREAKS  : forgetting `file_log/nkp-audit` here → audit logs stop;
+        #           forgetting `journald/all` → host logs stop.
         logs/host:
           receivers:
             - file_log/nkp-audit
             - journald/all
 
-  # WHY: right-size the per-node agent; the DaemonSet runs on every node.
+  # ── resources (the DaemonSet runs on EVERY node — size it sensibly) ─────────
+  # WHAT    : CPU/memory requests and limits for the agent container.
+  # DEFAULT : limits: {cpu: 200m, memory: 500Mi}   (NO requests!)
+  # OURS    : requests {200m/256Mi}, limits {1000m/512Mi}
+  # WHY     : requests give the scheduler a real footprint (the default has none);
+  #           a 1-core / 512Mi ceiling is a safe headroom for a busy node while
+  #           still bounding a runaway collector.
+  # BREAKS  : too low limits → OOMKilled / throttling under log bursts.
   resources:
     requests:
       cpu: 200m
@@ -204,26 +403,28 @@ agent:
       cpu: 1000m
       memory: 512Mi
 
-# -----------------------------------------------------------------------------
-# clusterReceiver — a single Deployment that talks to the Kubernetes API
-# -----------------------------------------------------------------------------
-# WHY: cluster-wide state (nodes, deployments, pod phases, Kubernetes Events)
-#      cannot be read from the node filesystem, so it needs one pod per cluster,
-#      not one per node. Without it you get node resources but no cluster picture.
-# WHY: enabled together with splunkPlatform.metricsEnabled. It also ingests
-#      Kubernetes Events/objects (as logs) into splunkPlatform.index.
+# =============================================================================
+# 5. clusterReceiver — ONE Deployment per cluster (reads the Kubernetes API)
+# =============================================================================
+# WHAT    : a single-replica Deployment running the k8s_cluster receiver (+
+#           k8s events/objects), because cluster-wide data cannot be read from a
+#           node's filesystem.
+# DEFAULT : enabled: true   (the chart enables it by default!)
+# OURS    : enabled: true   (explicit, for readability)
+# WHY     : it produces the cluster-level metrics (k8s.node.*, k8s.deployment.*,
+#           pod phases …) and ingests Kubernetes Events/objects as LOGS.
+# BREAKS  : disabled → you lose all cluster/object metrics + K8s event logs.
 clusterReceiver:
   enabled: true
-  # WHY: cluster-wide state (nodes, deployments, pod phases, Kubernetes Events)
-  #      cannot be read from the node filesystem, so it needs one pod per cluster,
-  #      not one per node. Without it you get node resources but no cluster picture.
-  # WHY: enabled together with splunkPlatform.metricsEnabled. It also ingests
-  #      Kubernetes Events/objects (as logs) into splunkPlatform.index.
-  #
-  # PROMETHEUS (optional): to ALSO ship the metrics NKP\'s kube-prometheus-stack
-  # scrapes, install with `--prometheus` — that merges the extra values file
-  # `values-prometheus.example.yaml` (a federation receiver + its own resources).
-  # Without it the collector does not touch Prometheus at all.
+  # ── resources ──────────────────────────────────────────────────────────────
+  # WHAT    : resources for that single pod.
+  # DEFAULT : limits: {cpu: 200m, memory: 500Mi}   (NO requests)
+  # OURS    : requests {100m/256Mi}, limits {500m/500Mi}
+  # WHY     : one pod per cluster, so it is cheap — but give the scheduler a real
+  #           request. NOTE: if you enable Prometheus federation
+  #           (./install.sh --prometheus) values-prometheus.example.yaml raises
+  #           these limits to 1Gi, because parsing tens of thousands of federated
+  #           series needs headroom.
   resources:
     requests:
       cpu: 100m
@@ -232,14 +433,43 @@ clusterReceiver:
       cpu: 500m
       memory: 500Mi
 
-# -----------------------------------------------------------------------------
-# Prometheus — OFF unless you opt in (see values-prometheus.example.yaml)
-# -----------------------------------------------------------------------------
+# =============================================================================
+# 6. Chart defaults we RELY ON but do not set (know what you get for free)
+# =============================================================================
+# These come from the chart's own values.yaml / templates (0.160.0). None of them
+# appear in this file — they are documented so nothing is a surprise.
+#
+# secret.create: true          The chart creates the K8s Secret holding the HEC
+#                              token and injects it as an env var (defaultMode
+#                              0440, validateSecret true). This is why you never
+#                              see a Secret in this lab's manifests.
+# agent.hostNetwork: true      The agent pod uses the host network, which is how
+#                              it can reach https://<nodeIP>:10250 (the kubelet).
+# tolerations:                 Top-level chart default schedules the agent on
+#                              master / control-plane / infra / system nodes too,
+#                              so control-plane logs (audit, apiserver) are read.
+# clusterReceiver.eventsEnabled: true   Kubernetes Events are shipped as LOGS to
+#                              splunkPlatform.index. Set it false to stop that.
+# clusterReceiver.k8sObjects:  pods + networkpolicies + CRDs pulled every 6h
+#                              (also as logs).
+# autodetect.prometheus: false No `prometheus.io/scrape` pod discovery (see the
+#                              Prometheus section below).
+# autodetect.istio: false      No Istio-specific scraping.
+# processors (template):       The chart inserts memory_limiter, batch,
+#                              resource_detection, resource and k8s_attributes
+#                              into the pipelines — that is what adds k8s metadata
+#                              (namespace/pod/container/node) to your records.
+# featureGates.useLightPrometheusReceiver: false, noDropLogsPipeline: false, etc.
+#                              (all default; nothing lab-specific needed here).
+#
+# =============================================================================
+# 7. Prometheus — OFF unless you opt in (see values-prometheus.example.yaml)
+# =============================================================================
 # WHY: the only receivers named `prometheus/*` in the default config scrape the
-#      COLLECTOR ITSELF (its own otelcol_* telemetry). Nothing scrapes
+#      COLLECTOR ITSELF (its own otelcol_* self-telemetry). Nothing scrapes
 #      kube-state-metrics, node-exporter, app /metrics, or pods annotated with
 #      prometheus.io/scrape unless you enable one of:
-#        autodetect.prometheus: true        # scrape prometheus.io/scrape pods
-#        agent.discovery.enabled: true    # the chart\'s discovery mode
-#        ./install.sh --prometheus        # federate NKP\'s Prometheus (recommended)
+#        autodetect.prometheus: true      # scrape prometheus.io/scrape pods
+#        agent.discovery.enabled: true    # the chart's discovery mode
+#        ./install.sh --prometheus        # federate NKP's Prometheus (recommended)
 #      NOTE: kube-prometheus-stack ServiceMonitors are NOT read by the collector.

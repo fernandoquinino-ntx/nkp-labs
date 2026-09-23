@@ -136,7 +136,21 @@ The variables this lab uses:
 
 ## 5. Step 2 — the settings **and why** (the point of this lab)
 
-Open [`values.example.yaml`](values.example.yaml). Every block has a `# WHY:`. Summary:
+Open [`values.example.yaml`](values.example.yaml). **Every key** is documented with a small block:
+
+```
+# WHAT    : what the value actually does
+# DEFAULT : the chart's own default (0.160.0) if you did not set it
+# OURS    : what this lab sets
+# WHY     : why we set it (or why we keep the default)
+# BREAKS  : what goes wrong when it is missing/incorrect
+```
+
+…and the file ends with **“Chart defaults we RELY ON but do not set”** (`secret.create`, `hostNetwork`,
+`tolerations`, `eventsEnabled`, `autodetect.*`, the built-in processors…), so nothing is a surprise.
+The optional Prometheus file uses the same legend.
+
+Short version of every key we set:
 
 | Setting | Value you set | **Why it exists / what breaks without it** |
 |---|---|---|
@@ -146,7 +160,9 @@ Open [`values.example.yaml`](values.example.yaml). Every block has a `# WHY:`. S
 | `splunkPlatform.index` | `k8s_logs` | The events index for logs. **Must be token-allowed and non-empty** — else `400 Incorrect index` and a **silent drop**. |
 | `splunkPlatform.metricsEnabled` + `metricsIndex` | `true` + `k8s_metrics` | Metrics need a **metrics-type** index; `metricsIndex` is required when metrics are on. |
 | `splunkPlatform.insecureSkipVerify` | `true` | The Cloud HEC cert (`SplunkCommonCA`) is not publicly trusted → strict TLS fails everywhere. |
+| `splunkPlatform.source` / `logsEnabled` / `tracesEnabled` | `kubernetes` / `true` / `false` | Same as the chart defaults — set explicitly so the intent is obvious (logs + metrics, no traces). |
 | `logsCollection.containers.enabled` | `true` | Container stdout/stderr (`/var/log/pods/*`). |
+| `logsCollection.journald.enabled` / `.directory` | `true` / `/var/log/journal` | Host logs live in journald. The chart's default directory is the **volatile** `/run/log/journal`; this cluster persists to `/var/log/journal` (wrong path ⇒ silent 0 host logs). |
 | `logsCollection.journald.units` | `[]` (empty) | The chart builds **one journald receiver per listed unit** — there is **no “all units”** option, so a short list silently misses host services. Empty + the custom `journald/all` receiver = full host parity. |
 | — `agent.config.receivers.journald/all` | no `units` | One receiver, **no filter** = the **whole** journal (all units **and** kernel entries). |
 | `logsCollection.extraFileLogs.file_log/nkp-audit` | audit path | kube-apiserver audit files. The map **key is the receiver name** and the chart renamed `filelog`→`file_log`, so it must be `file_log/...`. |

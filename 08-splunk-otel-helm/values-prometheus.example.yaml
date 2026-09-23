@@ -1,60 +1,137 @@
 # =============================================================================
 # values-prometheus.example.yaml — OPTIONAL add-on: ship NKP's Prometheus metrics
 # =============================================================================
-# This is a SECOND Helm values file, merged OVER values.example.yaml:
-#
+# A SECOND Helm values file, deep-merged OVER values.example.yaml:
 #     helm ... -f values.example.yaml -f values-prometheus.example.yaml
-#
-# `install.sh --prometheus` adds it for you (or set PROMETHEUS_ENABLED=1 in
-# local.env). Without it, the collector does NOT touch Prometheus at all.
+# `install.sh --prometheus` adds it for you (or PROMETHEUS_ENABLED=1 in local.env).
+# Without it, the collector does not touch Prometheus at all.
 #
 # WHAT IT DOES: federates Prometheus's /federate endpoint, i.e. ships the series
 # NKP's kube-prometheus-stack already scraped (28 ServiceMonitors + KSM +
-# node-exporter + …), including targets the collector could never scrape itself
-# (etcd/apiserver mTLS, auth'd endpoints). No ServiceMonitor replication, no
-# credentials to copy.
+# node-exporter + …), INCLUDING targets the collector could never scrape itself
+# (etcd/apiserver mTLS, authenticated endpoints). No ServiceMonitor replication.
 #
-# WHY the CLUSTER RECEIVER (not the agent): the agent is a DaemonSet — one pod per
-# node — so federating there would scrape the same Prometheus N times and
-# duplicate every series. The cluster receiver is ONE pod per cluster.
-#
-# SCOPE / COST — measured on the lab, one scrape (Splunk metrics bill PER datapoint):
-#   * default below (NKP platform jobs, no histogram buckets) ~18k series / 9.5 MB
-#   * {__name__=~"kube_.*|node_.*",__name__!~".*_bucket"}      ~44k series / 24 MB
-#   * {__name__!~".*_bucket"}                      (all, no histograms) ~192k / 99 MB
-#   * {__name__=~".+"}                                        ~457k series / 218 MB  <-- "everything"
-# To widen/narrow, edit the `match[]` selector below.
+# Same block legend as values.example.yaml:
+#   WHAT / DEFAULT / OURS / WHY / BREAKS
 # =============================================================================
 
 clusterReceiver:
+
+  # ── config (raw OpenTelemetry config, merged ON TOP of the chart's) ─────────
+  # WHAT    : extra OTel config for the cluster receiver. The chart generates a
+  #           default config from templates and deep-MERGES this on top
+  #           (maps merge; LISTS ARE REPLACED).
+  # DEFAULT : {}   (chart default: k8s_cluster + k8s_events + k8s_objects, and a
+  #           `metrics` pipeline whose receivers are just [k8s_cluster])
+  # OURS    : one more receiver (prometheus/nkp) wired into the metrics pipeline.
   config:
     receivers:
+
+      # ── prometheus/nkp ──────────────────────────────────────────────────────
+      # WHAT    : a Prometheus scrape receiver named `prometheus/nkp`. The part
+      #           before the slash is the receiver TYPE; `nkp` is our label.
+      #           KEEP IT SIMPLE: run it in the CLUSTER RECEIVER (one pod per
+      #           cluster), never in the agent (a DaemonSet = one pod per node,
+      #           which would federate the same Prometheus on every node and
+      #           duplicate every series N times).
+      # DEFAULT : (the chart has no such receiver; the only prometheus/* receivers
+      #           in the default config scrape the collector itself)
+      # OURS    : enabled, pointing at NKP's Prometheus.
+      # WHY     : federation is the only practical way to get "everything
+      #           Prometheus has" without replicating ServiceMonitors/credentials.
+      # BREAKS  : wrong target/selector → 0 points, and NO "Dropping data" (it
+      #           fails at SCRAPE time) — check the receiver counters, not just
+      #           the drops, and wait >1 scrape interval before concluding.
       prometheus/nkp:
-        # SCHEMA GOTCHA: it is `config.scrape_configs` — NOT `config.config.scrape_configs`.
-        # The doubled form is only valid INSIDE `receiver_creator`; as a standalone
-        # receiver it CrashLoops with:
-        #   'config' prometheus receiver: … field config not found in type config.plain
+
+        # WHAT    : the OTel prometheus receiver's config.
+        # ⚠ SCHEMA: it is `config.scrape_configs`. Do NOT write
+        #           `config.config.scrape_configs` — that doubled form is only valid
+        #           INSIDE `receiver_creator` (where config: nests one more level);
+        #           as a standalone receiver it CrashLoops with:
+        #             'config' prometheus receiver: … field config not found in type config.plain
         config:
           scrape_configs:
+
+            # WHAT    : a scrape job (Prometheus scrape vocabulary).
             - job_name: nkp-prometheus-federate
+
+              # WHAT    : how often to fetch the series.
+              # WHY     : 60s is a good volume/currency trade-off. Every scrape
+              #           writes one datapoint per series; Splunk metrics are billed
+              #           PER DATAPOINT, so shortening this multiplies cost linearly.
+              # BREAKS  : too short + a big scope = huge Splunk metrics volume.
               scrape_interval: 60s
+
+              # WHAT    : per-scrape timeout (must be < scrape_interval).
+              # WHY     : federating tens of thousands of series can take seconds;
+              #           50s avoids spurious timeouts without overlapping scrapes.
               scrape_timeout: 50s
+
+              # WHAT    : the Prometheus HTTP endpoint path.
+              # WHY     : /federate returns the CURRENT value of every series
+              #           Prometheus holds (vs /metrics, which is Prometheus's own
+              #           self-telemetry — a common and confusing mistake).
               metrics_path: /federate
+
+              # WHAT    : query parameters sent to /federate.
+              # WHY     : `/federate` REQUIRES a `match[]` selector; without it you
+              #           get a 400 and zero series.
               params:
                 'match[]':
+
+                  # WHAT    : the series selector — this is THE scope/cost knob.
+                  # DEFAULT : (none — you must supply one)
+                  # OURS    : NKP platform/controller/app jobs, EXCLUDING histogram
+                  #           buckets (the `_bucket` series are ~60% of everything)
+                  #           and the k8s-core jobs we already collect from
+                  #           kubelet_stats / k8s_cluster (to avoid duplication).
+                  # MEASURED on the lab (one scrape):
+                  #   default (this line)                            ~18k series / 9.5 MB
+                  #   {__name__=~"kube_.*|node_.*",__name__!~".*_bucket"}  ~44k / 24 MB
+                  #   {__name__!~".*_bucket"}                        ~192k / 99 MB
+                  #   {__name__=~".+"}   (EVERYTHING)                ~457k / 218 MB
+                  # WHY     : "everything" is 218 MB PER SCRAPE — not viable. Start
+                  #           scoped; widen deliberately.
+                  # BREAKS  : a syntax error/misspelled label in the selector → 0
+                  #           series (no error in Splunk, nothing arrives).
                   - '{job=~"kommander.*|nkp-.*|opencost|centralized-.*|kubefed-.*|kubetunnel-.*|loggingstack-.*|dex-.*|kube-prometheus-stack-.*|karma|grafana-logging",__name__!~".*_bucket"}'
+
+              # WHAT    : where to scrape from.
+              # WHY     : NKP's Prometheus Service; the FQDN
+              #           <svc>.<namespace>.svc works from any pod.
+              #           Alternatives if you ever need them:
+              #             https://kube-prometheus-stack-prometheus.kommander.svc:9090
+              #           (plain HTTP is fine here — it is in-cluster traffic).
+              # BREAKS  : wrong host/port or a NetworkPolicy that blocks egreess →
+              #           connection refused / i/o timeout, 0 series.
               static_configs:
-                # NKP's Prometheus service (kube-prometheus-stack in namespace `kommander`).
                 - targets:
                     - kube-prometheus-stack-prometheus.kommander.svc:9090
+
     service:
       pipelines:
+
+        # ── metrics.receivers ───────────────────────────────────────────────────
+        # WHAT    : the receivers feeding the cluster receiver's `metrics` pipeline.
+        # DEFAULT : [k8s_cluster]
+        # OURS    : [k8s_cluster, prometheus/nkp]
+        # WHY     : LISTS ARE REPLACED, not merged — so the default receiver MUST be
+        #           restated, otherwise k8s_cluster metrics stop the moment this
+        #           fragment is applied.
+        # BREAKS  : writing just [prometheus/nkp] here silently disables all
+        #           cluster/object metrics.
         metrics:
-          # lists are REPLACED (not merged) -> the base pipeline's receiver must
-          # be repeated here, otherwise k8s_cluster metrics stop.
           receivers: [k8s_cluster, prometheus/nkp]
-  # WHY bigger than the base: parsing tens of thousands of federated series every
-  # scrape needs headroom. Watch memory and tune.
+
+  # ── resources (bigger than the base, on purpose) ────────────────────────────
+  # WHAT    : the cluster receiver pod's CPU/memory.
+  # DEFAULT : limits {cpu: 200m, memory: 500Mi}, no requests
+  # OURS    : requests {200m/512Mi}, limits {1000m/1Gi}
+  # WHY     : parsing tens of thousands of federated series every 60s needs
+  #           headroom. Measured on the lab with the default scope: ~477 MiB RSS.
+  # BREAKS  : too little memory → OOMKilled on the cluster receiver, and the
+  #           rollout never becomes Ready.
   resources:
     requests:
       cpu: 200m
