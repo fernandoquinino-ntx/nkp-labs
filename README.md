@@ -2,6 +2,8 @@
 
 Small, self-contained **Kubernetes teaching labs** — scenarios you can apply, watch, and clean up in
 minutes. Written for **Nutanix Kubernetes Platform (NKP)** but the core labs run on any cluster.
+**Lab 12** is the exception: it builds the Ubuntu jump host that installs NKP, including a path
+with **no internet on the VM**.
 
 The manifests are **portable templates** (they use `${PLACEHOLDERS}`); you supply the values in
 `local.env` and the scripts render + apply them.
@@ -22,7 +24,62 @@ The manifests are **portable templates** (they use `${PLACEHOLDERS}`); you suppl
 | 09 | [09-traefik-oidc-okta](09-traefik-oidc-okta/) | protect an app with **Okta OIDC** using the **Traefik OIDC plugin middleware** — a hands-on lab with a **page per step** (`steps/01…10`), no oauth2-proxy, no Dex |
 | 10 | [10-vault-install](10-vault-install/) | install **HashiCorp Vault** (dev / standalone / HA), **initialize + unseal** it, enable a **KV v2** engine and reach the UI — the prerequisite for lab 11 |
 | 11 | [11-vault-eso](11-vault-eso/) | pull a secret from **Vault** with the **External Secrets Operator** — the **`ClusterSecretStore`** (the "credential store") set via an **NKP `AppDeployment` override** (`extraObjects`), so it is **visible/editable in the UI** |
-| 12 | [12-bootstrap-machine](12-bootstrap-machine/) | build the **Ubuntu jump host** (cloud-init) and install a **self-managed NKP 2.19** cluster from the Helm charts |
+| 12 | [12-bootstrap-machine](12-bootstrap-machine/) | paste a **Prism cloud-init** that builds the **Ubuntu jump host** and installs **self-managed NKP 2.19.1**. Online, or **fully offline** from one public bundle |
+
+## Lab 12 — bootstrap machine
+
+This lab does not apply manifests to a cluster you already have. It builds the machine that creates
+the cluster. Full steps: [12-bootstrap-machine](12-bootstrap-machine/).
+
+Two ways to boot the VM. Both set the hostname, the `ubuntu` password, and SSH. Paste the YAML into
+Prism. Do not base64-encode it.
+
+| | Online | Offline (no internet on the VM) |
+|---|---|---|
+| Paste | [cloud-init.yaml](https://raw.githubusercontent.com/fernandoquinino-ntx/nkp-labs/main/12-bootstrap-machine/cloud-init.yaml) | [cloud-init-offline.yaml](https://raw.githubusercontent.com/fernandoquinino-ntx/nkp-labs/main/12-bootstrap-machine/cloud-init-offline.yaml) |
+| Installers come from | the internet, retried, resumed after a reboot | one file you copy with `scp` |
+| Later fixes | `nkp-update` pulls the latest scripts from this repo | push a new bundle. Your `env`, values, and kubeconfigs stay |
+
+**One public bundle, no GitHub login.** CI builds it on every change to this lab, installs it in
+Ubuntu 24.04 with the network turned off, and publishes the release:
+
+https://github.com/fernandoquinino-ntx/nkp-labs/releases/tag/offline-bundle
+
+```bash
+./12-bootstrap-machine/scripts/get-offline-bundle.sh
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\12-bootstrap-machine\scripts\get-offline-bundle.ps1
+```
+
+```powershell
+scp dist\nkp-bootstrap-offline-v2.19.1-noble-amd64.tar.gz ubuntu@<vm-ip>:/home/ubuntu/
+```
+
+That 578 MB file is the whole toolchain. Nothing else is downloaded on the VM.
+
+| Inside the file | What |
+|---|---|
+| `downloads/` | nkp v2.19.1, kubectl v1.36.2, Helm v3.22.1, Flux v2.10.0, k9s, yq. Static binaries, no extra libraries |
+| 370 `.deb` packages | Ubuntu 24.04 packages, Docker Engine, and their dependencies (`libc6`, `openssl`, OpenSSH, …) |
+| `images/registry-2.tar` | the local registry image, saved with `docker save` |
+| `labs/` | this lab: both install paths, the Helm charts, the registry scripts |
+
+The VM unpacks it, checks every file, and continues after a reboot from the first unfinished step.
+`nkp-bootstrap-status` shows where it is. The log is `/var/log/nkp-bootstrap.log`.
+
+**Then install the cluster**, from `/home/ubuntu/nkp-workspace`, by either path:
+
+| Path | Command | From |
+|---|---|---|
+| Helm | `./scripts/install-nkp.sh` | kind bootstrap, chart, kubeconfig, pivot, optional Kommander |
+| CLI | `./scripts/create-cluster.sh` | `nkp create cluster nutanix --self-managed` |
+
+Use one path for a given cluster name. A TLS registry on the jump host
+(`./scripts/setup-local-registry.sh`) and the trust secret for the cluster are in
+[step 06](12-bootstrap-machine/steps/06-airgap-registry.md). The 33 GB NKP air-gapped bundle is
+separate. It is not inside the 578 MB file.
 
 ## Procedures (step-by-step, copy-paste)
 
@@ -53,7 +110,9 @@ Prefer the raw commands? `./scripts/render.sh <lab>` writes `rendered/<lab>/` an
 
 ## Requirements
 
-- `kubectl` pointing at your cluster.
+- `kubectl` pointing at your cluster. Labs 00–11 need this. Lab 12 builds the host that creates the cluster.
+- (lab 12) Prism Central, the Ubuntu 24.04 cloud image, and either internet on the VM or the
+  [offline bundle](https://github.com/fernandoquinino-ntx/nkp-labs/releases/tag/offline-bundle).
 - `helm` (v3) for **lab 08** (the Splunk OTel Collector chart).
 - **A ReadWriteMany StorageClass** (lab 01/02 need it) — e.g. Nutanix **NUS** `nus-files`, CephFS, NFS,
   Amazon EFS…
