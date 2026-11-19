@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Download the NKP 2.19 air-gapped bundle while this host still has a path to the internet.
-# The file is about 37 GB. Resume with the same command (curl -C -).
+# Download the NKP 2.19.1 air-gapped bundle while this host still has a path to the internet.
+# The file is about 33 GiB. Resume with the same command (curl -C -).
 set -Eeuo pipefail
 trap 'echo "ERROR: [fetch-airgap-bundle] failed at line $LINENO on command: $BASH_COMMAND" >&2' ERR
 
 LAB="$(cd "$(dirname "$0")/.." && pwd)"
-URL="${AIRGAP_URL:-https://downloads.d2iq.com/dkp/v2.19.0/nkp-air-gapped-bundle_v2.19.0_linux_amd64.tar.gz}"
+URL="${AIRGAP_URL:-https://downloads.d2iq.com/dkp/v2.19.1/nkp-air-gapped-bundle_v2.19.1_linux_amd64.tar.gz}"
 DEST="${AIRGAP_DIR:-${LAB}/airgap}"
 FILE="${DEST}/$(basename "${URL}")"
 

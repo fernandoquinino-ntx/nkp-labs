@@ -97,7 +97,7 @@ write_files:
       #!/bin/bash
       set -euo pipefail
       export PATH="$PATH:/usr/sbin:/sbin:/usr/bin:/bin"
-      NKP_VERSION="${NKP_VERSION:-v2.19.0}"
+      NKP_VERSION="${NKP_VERSION:-v2.19.1}"
       KUBECTL_VERSION="${KUBECTL_VERSION:-v1.36.2}"
       K9S_VERSION="${K9S_VERSION:-v0.51.0}"
       YQ_VERSION="${YQ_VERSION:-v4.47.1}"

@@ -83,7 +83,7 @@ Use one path for a given cluster name.
 | This lab | https://github.com/fernandoquinino-ntx/nkp-labs/tree/main/12-bootstrap-machine |
 | Cloud-init (raw, paste into Prism) | https://raw.githubusercontent.com/fernandoquinino-ntx/nkp-labs/main/12-bootstrap-machine/cloud-init.yaml |
 | Ubuntu 24.04 amd64 cloud image | https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img |
-| NKP 2.19.0 CLI (linux amd64) | https://downloads.d2iq.com/dkp/v2.19.0/nkp_v2.19.0_linux_amd64.tar.gz |
+| NKP 2.19.1 CLI (linux amd64) | https://downloads.d2iq.com/dkp/v2.19.1/nkp_v2.19.1_linux_amd64.tar.gz |
 | kubectl v1.36.2 (linux amd64) | https://dl.k8s.io/release/v1.36.2/bin/linux/amd64/kubectl |
 | Helm 3 install script | https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 |
 | Flux CLI install script | https://fluxcd.io/install.sh |
@@ -91,10 +91,10 @@ Use one path for a given cluster name.
 | yq v4.47.1 (linux amd64) | https://github.com/mikefarah/yq/releases/download/v4.47.1/yq_linux_amd64 |
 | Docker Engine (Ubuntu) | https://download.docker.com/linux/ubuntu |
 | NKP 2.19 release note | https://next.nutanix.com/product-updates/nutanix-kubernetes-platform-nkp-2-19-45966 |
-| NKP 2.19 air-gapped bundle | https://downloads.d2iq.com/dkp/v2.19.0/nkp-air-gapped-bundle_v2.19.0_linux_amd64.tar.gz |
+| NKP 2.19.1 air-gapped bundle | https://downloads.d2iq.com/dkp/v2.19.1/nkp-air-gapped-bundle_v2.19.1_linux_amd64.tar.gz |
 
-NKP 2.19 defaults to Kubernetes **1.36.2** (1.35.x is still supported). The public CLI archive is
-**linux amd64** only. sha256 of `nkp_v2.19.0_linux_amd64.tar.gz`:
-`38c1198a4226cdfb99afe601b1bedfe4459df478c4a4bac59a461c1926032fe4`.
+NKP **2.19.1** keeps Kubernetes **1.36.2** (1.35.x is still supported). The public CLI archive is
+**linux amd64** only. sha256 of `nkp_v2.19.1_linux_amd64.tar.gz`:
+`3d311ecb1848eadfd9e749f1ed4b451f0f16b63679fd537d62763051b396f770`.
 
 **Next:** [01 — image and VM](steps/01-image-and-vm.md).

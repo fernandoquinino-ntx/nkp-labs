@@ -20,7 +20,7 @@ Edit `values.local.yaml` before you run anything:
 | `image` | an NKP node image that **already exists in Prism Central** |
 | `controlPlaneEndpointIp` | kube-vip address |
 | `serviceLoadBalancer.rangeStart` / `rangeEnd` | MetalLB range |
-| `kubernetesVersion` / `nkpVersion` | `v1.36.2` / `v2.19.0` unless you are staying on 1.35.x |
+| `kubernetesVersion` / `nkpVersion` | `v1.36.2` / `v2.19.1` (2.19.1 keeps Kubernetes 1.36.2) |
 
 `env` sets `CLUSTER_NAME` and `EXPECTED` (control-plane replicas + worker replicas). The chart
 defaults are 3 + 2, so `EXPECTED=5`.

@@ -3,4 +3,4 @@ name: nkp-cluster
 description: "One chart for an NKP cluster — `mode: management` (self-managed: NKPCluster with the host label, 5 Secrets + kommander bootstrap config) or `mode: managed` (workload: NKPCluster + 3 Secrets)."
 type: application
 version: 0.1.0
-appVersion: "2.19.0"
+appVersion: "2.19.1"

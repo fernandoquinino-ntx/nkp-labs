@@ -34,8 +34,8 @@ serviceLoadBalancer:
 
 # --- versions / images -------------------------------------------------------
 kubernetesVersion: "v1.36.2"
-nkpVersion: "v2.19.0"
-clusterClassName: "nkp-nutanix-v2.19.0"
+nkpVersion: "v2.19.1"
+clusterClassName: "nkp-nutanix-v2.19.1"
 image: "nkp-rocky-9.8-1.36.2"
 sshPublicKey: ""                          # REQUIRED
 sshUsername: konvoy

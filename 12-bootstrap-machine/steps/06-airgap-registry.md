@@ -8,14 +8,14 @@ the VM about **200 GiB** if the tarball stays on the bastion.
 
 | | |
 |---|---|
-| URL | https://downloads.d2iq.com/dkp/v2.19.0/nkp-air-gapped-bundle_v2.19.0_linux_amd64.tar.gz |
-| Size | 37171316708 bytes (~35 GiB) |
-| Published | 2026-10-16 |
+| URL | https://downloads.d2iq.com/dkp/v2.19.1/nkp-air-gapped-bundle_v2.19.1_linux_amd64.tar.gz |
+| Size | 35856981169 bytes (~33 GiB) |
+| Published | 2026-11-06 |
 
 ```bash
 cd /home/ubuntu/nkp-workspace
 ./scripts/fetch-airgap-bundle.sh
-tar -xzf airgap/nkp-air-gapped-bundle_v2.19.0_linux_amd64.tar.gz -C airgap
+tar -xzf airgap/nkp-air-gapped-bundle_v2.19.1_linux_amd64.tar.gz -C airgap
 ```
 
 `nkp create image` does not use the CLI tarball for OS packages. Point it at the extracted

@@ -23,7 +23,7 @@ https://raw.githubusercontent.com/fernandoquinino-ntx/nkp-labs/main/12-bootstrap
 | Tool | From |
 |---|---|
 | Docker Engine, compose, buildx | https://download.docker.com/linux/ubuntu |
-| `nkp` v2.19.0 | https://downloads.d2iq.com/dkp/v2.19.0/nkp_v2.19.0_linux_amd64.tar.gz |
+| `nkp` v2.19.1 | https://downloads.d2iq.com/dkp/v2.19.1/nkp_v2.19.1_linux_amd64.tar.gz |
 | `kubectl` v1.36.2 | https://dl.k8s.io/release/v1.36.2/bin/linux/amd64/kubectl |
 | Helm 3 | https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 |
 | Flux CLI | https://fluxcd.io/install.sh |
