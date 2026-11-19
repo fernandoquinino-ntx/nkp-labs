@@ -1,10 +1,9 @@
-# One command on a Windows client: download the latest offline bundle that CI built
-# from main, check its sha256, and print the push command.
+# One command on a Windows client: download the latest offline bundle from the public
+# GitHub release, check its sha256, and print the copy command. No login.
 #
 #   powershell -ExecutionPolicy Bypass -File .\scripts\get-offline-bundle.ps1 [OUT_DIR]
 #
-# Needs the GitHub CLI, logged in once:  winget install GitHub.cli ; gh auth login
-# Without gh it builds the bundle here when bash and Docker are installed.
+# Without that release it builds the bundle here when bash and Docker are installed.
 #Requires -Version 5.1
 param(
     [string]$OutDir
@@ -28,56 +27,33 @@ if ($hostScript -match 'NKP_VERSION="\$\{NKP_VERSION:-([^}]+)\}"') {
 $Name = "nkp-bootstrap-offline-$Version-noble-amd64"
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 
-function Invoke-Gh {
-    & gh @args
-    if ($LASTEXITCODE -ne 0) { throw "gh $($args -join ' ') failed ($LASTEXITCODE)" }
+$base = "https://github.com/$Repo/releases/download/offline-bundle"
+$file = Join-Path $OutDir "$Name.tar.gz"
+$sumFile = "$file.sha256"
+$ProgressPreference = 'SilentlyContinue'
+Write-Host "=== $base/$Name.tar.gz ==="
+$downloaded = $false
+try {
+    Invoke-WebRequest -Uri "$base/$Name.tar.gz" -OutFile $file -UseBasicParsing
+    Invoke-WebRequest -Uri "$base/$Name.tar.gz.sha256" -OutFile $sumFile -UseBasicParsing
+    Invoke-WebRequest -Uri "$base/cloud-init-offline.yaml" -OutFile (Join-Path $OutDir 'cloud-init-offline.yaml') -UseBasicParsing
+    $downloaded = $true
+} catch {
+    Write-Host "the public release is not there yet ($($_.Exception.Message))"
+    Remove-Item -Force $file, $sumFile -ErrorAction SilentlyContinue
 }
-
-$gh = Get-Command gh -ErrorAction SilentlyContinue
-$loggedIn = $false
-if ($gh) {
-    # `gh auth status` exits non-zero when any saved account is bad, even if the
-    # active account works. `gh api user` checks the active account only.
-    & gh api user --jq .login *> $null
-    $loggedIn = $LASTEXITCODE -eq 0
-}
-
-if ($loggedIn) {
-    # The quotes matter: a bare comma is PowerShell's array operator, and gh then
-    # sees headSha as its own argument.
-    $raw = Invoke-Gh run list -R $Repo --workflow offline-bundle.yml --branch main --status success --limit 1 --json 'databaseId,headSha,createdAt'
-    $runs = @($raw | ConvertFrom-Json)
-    if ($runs -and $runs[0].databaseId) {
-        $run = $runs[0]
-        $commit = $run.headSha.Substring(0, [Math]::Min(7, $run.headSha.Length))
-        Write-Host "=== CI run $($run.databaseId), commit $commit, built $($run.createdAt) ==="
-        foreach ($ext in '.tar.gz', '.tar.gz.sha256') {
-            $old = Join-Path $OutDir ($Name + $ext)
-            if (Test-Path $old) { Remove-Item -Force $old }
-        }
-        Invoke-Gh run download $run.databaseId -R $Repo -n $Name -D $OutDir
-        $file = Join-Path $OutDir "$Name.tar.gz"
-        $sumFile = Join-Path $OutDir "$Name.tar.gz.sha256"
-        if (-not (Test-Path $file) -or -not (Test-Path $sumFile)) {
-            throw "the CI artifact did not contain $Name.tar.gz and its .sha256"
-        }
-        $got = (Get-FileHash -Algorithm SHA256 $file).Hash.ToLower()
-        $expected = ((Get-Content -Raw $sumFile) -split '\s+')[0].ToLower()
-        if ($got -ne $expected) {
-            Remove-Item -Force $file
-            throw "checksum mismatch for $file. Run the command again."
-        }
-        $size = [Math]::Round((Get-Item $file).Length / 1MB)
-        Write-Host "$file ($size MB), sha256 ok"
-        Write-Host "next (bash): $Lab/scripts/push-offline-bundle.sh $file ubuntu@<bootstrap-ip> --follow"
-        Write-Host "or copy it with Windows OpenSSH:"
-        Write-Host "  scp `"$file`" ubuntu@<bootstrap-ip>:/home/ubuntu/"
-        return
+if ($downloaded) {
+    $got = (Get-FileHash -Algorithm SHA256 $file).Hash.ToLower()
+    $expected = ((Get-Content -Raw $sumFile) -split '\s+')[0].ToLower()
+    if ($got -ne $expected) {
+        Remove-Item -Force $file
+        throw "checksum mismatch for $file. Run the command again."
     }
-    Write-Host "no successful offline-bundle CI run on $Repo main"
-} else {
-    Write-Host "gh is not installed or not logged in. Install it with: winget install GitHub.cli"
-    Write-Host "Then: gh auth login"
+    $size = [Math]::Round((Get-Item $file).Length / 1MB)
+    Write-Host "$file ($size MB), sha256 ok"
+    Write-Host "copy it with Windows OpenSSH:"
+    Write-Host "  scp `"$file`" ubuntu@<bootstrap-ip>:/home/ubuntu/"
+    return
 }
 
 $bash = Get-Command bash -ErrorAction SilentlyContinue

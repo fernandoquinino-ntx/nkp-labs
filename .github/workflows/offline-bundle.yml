@@ -20,6 +20,8 @@ jobs:
   bundle:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v5
 
@@ -46,3 +48,17 @@ jobs:
           retention-days: 30
           compression-level: 0
           if-no-files-found: error
+
+      - name: Publish the bundle on the public offline-bundle release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          name="${{ steps.build.outputs.name }}"
+          gh release delete offline-bundle --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release create offline-bundle \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "NKP offline bootstrap bundle" \
+            --notes "Built from ${GITHUB_SHA}. Download needs no login." \
+            "dist/${name}.tar.gz" \
+            "dist/${name}.tar.gz.sha256" \
+            dist/cloud-init-offline.yaml

@@ -32,19 +32,22 @@ git clone https://github.com/fernandoquinino-ntx/nkp-labs.git && cd nkp-labs/12-
 ./scripts/get-offline-bundle.sh
 ```
 
-Windows PowerShell (same download and the same sha256 check):
+Windows PowerShell (same download and the same sha256 check, no login):
 
 ```powershell
 git clone https://github.com/fernandoquinino-ntx/nkp-labs.git; cd nkp-labs\12-bootstrap-machine
-winget install GitHub.cli
-gh auth login
 powershell -ExecutionPolicy Bypass -File .\scripts\get-offline-bundle.ps1
 ```
 
-The script downloads the latest successful build of the
-[`offline-bundle` workflow](https://github.com/fernandoquinino-ntx/nkp-labs/actions/workflows/offline-bundle.yml)
-with `gh` (run `gh auth login` first) and checks its sha256. Without `gh` or a CI build it runs
-`build-offline-bundle.sh` here, which needs Docker. The result is
+The script downloads the public release. No GitHub login. The direct files are:
+
+https://github.com/fernandoquinino-ntx/nkp-labs/releases/download/offline-bundle/nkp-bootstrap-offline-v2.19.1-noble-amd64.tar.gz
+
+https://github.com/fernandoquinino-ntx/nkp-labs/releases/download/offline-bundle/nkp-bootstrap-offline-v2.19.1-noble-amd64.tar.gz.sha256
+
+CI publishes that release on every successful build of the
+[`offline-bundle` workflow](https://github.com/fernandoquinino-ntx/nkp-labs/actions/workflows/offline-bundle.yml).
+Until the first release exists, the script builds the bundle here, which needs Docker. The result is
 `dist/nkp-bootstrap-offline-v2.19.1-noble-amd64.tar.gz` (about 0.6 GiB).
 
 CI builds a new bundle on every push to `12-bootstrap-machine/`, so the bundle always carries the
