@@ -25,7 +25,7 @@ PY
 docker run --rm --network none --platform linux/amd64 \
   -v "${BUNDLE}:/drop/$(basename "${BUNDLE}"):ro" -v "${TMP}/loader.sh:/loader.sh:ro" \
   ubuntu:24.04 bash -Eeuo pipefail -c '
-    useradd -m -s /bin/bash ubuntu
+    id ubuntu >/dev/null 2>&1 || useradd -m -s /bin/bash ubuntu
     cp /drop/*.tar.gz /home/ubuntu/
     printf "%s\n" NKP_MODE=offline NKP_OFFLINE_DIR=/opt/nkp-offline NKP_OFFLINE_DROP=/home/ubuntu \
       > /etc/default/nkp-bootstrap
