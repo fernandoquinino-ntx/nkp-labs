@@ -11,6 +11,10 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# PowerShell 7 turns a native command's stderr into an error. gh writes progress there.
+if (Get-Variable PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+    $PSNativeCommandUseErrorActionPreference = $false
+}
 $Lab = Split-Path -Parent $PSScriptRoot
 if (-not $OutDir) { $OutDir = Join-Path $Lab 'dist' }
 $Repo = if ($env:NKP_LABS_GH_REPO) { $env:NKP_LABS_GH_REPO } else { 'fernandoquinino-ntx/nkp-labs' }
@@ -32,12 +36,16 @@ function Invoke-Gh {
 $gh = Get-Command gh -ErrorAction SilentlyContinue
 $loggedIn = $false
 if ($gh) {
-    & gh auth status *> $null
+    # `gh auth status` exits non-zero when any saved account is bad, even if the
+    # active account works. `gh api user` checks the active account only.
+    & gh api user --jq .login *> $null
     $loggedIn = $LASTEXITCODE -eq 0
 }
 
 if ($loggedIn) {
-    $raw = Invoke-Gh run list -R $Repo --workflow offline-bundle.yml --branch main --status success --limit 1 --json databaseId,headSha,createdAt
+    # The quotes matter: a bare comma is PowerShell's array operator, and gh then
+    # sees headSha as its own argument.
+    $raw = Invoke-Gh run list -R $Repo --workflow offline-bundle.yml --branch main --status success --limit 1 --json 'databaseId,headSha,createdAt'
     $runs = @($raw | ConvertFrom-Json)
     if ($runs -and $runs[0].databaseId) {
         $run = $runs[0]
