@@ -1,0 +1,192 @@
+#cloud-config
+# Paste this file as-is into Prism Central:
+#   Create VM → Guest Customization → Cloud-init → Script (user-data).
+# Paste the YAML. Do not base64-encode it. Prism encodes it when it saves the VM.
+#
+# Prism VM name is the Name field in the wizard. This file only sets the name
+# inside the guest. Use the same string in both places.
+#
+# Before pasting, edit the four lines marked EDIT.
+# Ubuntu 24.04 cloud image is the primary target. The same file also grows a
+# Rocky LVM root disk and installs packages with dnf when that is the image.
+
+# --- EDIT: guest name (match the Prism VM name) ---
+preserve_hostname: false
+hostname: nkp-bootstrap
+fqdn: nkp-bootstrap.ntnxlab.local
+manage_etc_hosts: true
+
+# --- EDIT: login. Password login is on so the first SSH works from Prism. ---
+ssh_pwauth: true
+disable_root: true
+ssh_deletekeys: true
+
+groups:
+  - docker
+
+users:
+  - name: ubuntu
+    gecos: NKP bootstrap
+    groups: [docker]
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: false
+    # EDIT: replace with your public key, or delete this list and use the password.
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIReplaceThisKeyBeforePaste nkp-bootstrap
+
+chpasswd:
+  expire: false
+  list: |
+    ubuntu:ChangeMe-NKP-Bootstrap
+
+package_update: true
+package_upgrade: false
+
+write_files:
+  - path: /usr/local/sbin/expand-root-disk.sh
+    permissions: "0755"
+    owner: root:root
+    content: |
+      #!/bin/bash
+      # This image is an LVM qcow2 (Ubuntu *-lvm.img or Rocky GenericCloud-LVM).
+      # Grow the Prism disk, then the PV, then the root logical volume.
+      set -euxo pipefail
+      export PATH="$PATH:/usr/sbin:/sbin:/usr/bin:/bin"
+      echo "=== disk expansion ==="
+      for dev in /sys/class/scsi_disk/*/device/rescan /sys/class/block/sd*/device/rescan /sys/class/block/vd*/device/rescan; do
+        [ -e "$dev" ] && echo 1 > "$dev" || true
+      done
+      udevadm settle || true
+      ROOT_SRC="$(findmnt -n -o SOURCE /)"
+      FSTYPE="$(findmnt -n -o FSTYPE /)"
+      echo "root=${ROOT_SRC} fstype=${FSTYPE}"
+      grow_disk() {
+        local src="$1" pk part
+        pk="$(lsblk -no PKNAME "$src" 2>/dev/null | awk 'NF{print $1; exit}')"
+        part="$(lsblk -no PARTN "$src" 2>/dev/null | awk 'NF{print $1; exit}')"
+        [ -n "$pk" ] && [ -n "$part" ] || return 0
+        sgdisk -e "/dev/${pk}" || true
+        growpart "/dev/${pk}" "$part"
+        partprobe "/dev/${pk}" || true
+      }
+      case "$ROOT_SRC" in
+        /dev/mapper/*|/dev/dm-*) ;;
+        *) echo "root ${ROOT_SRC} is not an LVM logical volume. Use an LVM cloud image." >&2; exit 1 ;;
+      esac
+      PV="$(pvs --noheadings -o pv_name | awk 'NF{print $1; exit}')"
+      [ -n "${PV:-}" ] || { echo "no LVM physical volume found" >&2; exit 1; }
+      grow_disk "$PV"
+      pvresize "$PV"
+      lvextend -l +100%FREE -r "$ROOT_SRC"
+      df -h /
+      echo "=== disk expansion done ==="
+
+  - path: /usr/local/sbin/install-nkp-bootstrap-tools.sh
+    permissions: "0755"
+    owner: root:root
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      export PATH="$PATH:/usr/sbin:/sbin:/usr/bin:/bin"
+      NKP_VERSION="${NKP_VERSION:-v2.19.0}"
+      KUBECTL_VERSION="${KUBECTL_VERSION:-v1.36.2}"
+      K9S_VERSION="${K9S_VERSION:-v0.51.0}"
+      YQ_VERSION="${YQ_VERSION:-v4.47.1}"
+      NKP_BASE_URL="${NKP_DOWNLOAD_BASE_URL:-https://downloads.d2iq.com/dkp}"
+      case "$(uname -m)" in
+        x86_64|amd64) arch="amd64" ;;
+        aarch64|arm64) arch="arm64" ;;
+        *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+      esac
+      . /etc/os-release
+      if command -v apt-get >/dev/null 2>&1; then
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update
+        apt-get install -y ca-certificates curl gnupg jq tar unzip wget git \
+          openssh-server cloud-guest-utils gdisk lvm2 e2fsprogs xfsprogs parted \
+          conntrack ebtables iptables socat sshpass make python3
+        /usr/local/sbin/expand-root-disk.sh
+        if ! command -v docker >/dev/null 2>&1; then
+          install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+          chmod a+r /etc/apt/keyrings/docker.asc
+          echo "deb [arch=${arch} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu ${VERSION_CODENAME} stable" \
+            > /etc/apt/sources.list.d/docker.list
+          apt-get update
+          apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+        fi
+        systemctl enable --now ssh
+      elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y ca-certificates curl gnupg2 jq tar unzip wget git \
+          openssh-server cloud-utils-growpart gdisk lvm2 e2fsprogs xfsprogs parted \
+          conntrack ebtables iptables socat sshpass make python3
+        /usr/local/sbin/expand-root-disk.sh
+        if ! command -v docker >/dev/null 2>&1; then
+          dnf-3 config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo \
+            || dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+          dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+        fi
+        systemctl enable --now sshd
+      else
+        echo "no apt-get or dnf" >&2
+        exit 1
+      fi
+      systemctl enable --now docker
+      usermod -aG docker ubuntu || true
+
+      if ! command -v kubectl >/dev/null 2>&1 || ! kubectl version --client 2>/dev/null | grep -q "${KUBECTL_VERSION#v}"; then
+        curl -fsSL -o /tmp/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${arch}/kubectl"
+        install -m 0755 /tmp/kubectl /usr/local/bin/kubectl
+        rm -f /tmp/kubectl
+      fi
+      if ! command -v helm >/dev/null 2>&1; then
+        curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      fi
+      if ! command -v flux >/dev/null 2>&1; then
+        curl -fsSL https://fluxcd.io/install.sh | bash
+      fi
+      if ! command -v k9s >/dev/null 2>&1; then
+        curl -fsSL -o /tmp/k9s.tar.gz \
+          "https://github.com/derailed/k9s/releases/download/${K9S_VERSION}/k9s_Linux_${arch}.tar.gz"
+        tar -xzf /tmp/k9s.tar.gz -C /tmp k9s
+        install -m 0755 /tmp/k9s /usr/local/bin/k9s
+        rm -f /tmp/k9s /tmp/k9s.tar.gz
+      fi
+      if ! command -v yq >/dev/null 2>&1; then
+        curl -fsSL -o /usr/local/bin/yq \
+          "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${arch}"
+        chmod 0755 /usr/local/bin/yq
+      fi
+      if ! command -v nkp >/dev/null 2>&1; then
+        nkp_url="${NKP_DOWNLOAD_URL:-${NKP_BASE_URL}/${NKP_VERSION}/nkp_${NKP_VERSION}_linux_${arch}.tar.gz}"
+        echo "downloading nkp from ${nkp_url}"
+        curl -fL "${nkp_url}" -o /tmp/nkp.tar.gz
+        tmp="$(mktemp -d)"
+        tar -xzf /tmp/nkp.tar.gz -C "${tmp}"
+        bin="$(find "${tmp}" -type f -name nkp | head -n1)"
+        [ -n "${bin}" ] || { echo "nkp binary not found in archive" >&2; exit 1; }
+        install -m 0755 "${bin}" /usr/local/bin/nkp
+        rm -rf "${tmp}" /tmp/nkp.tar.gz
+      fi
+      NKP_LABS_REPO="${NKP_LABS_REPO:-https://github.com/fernandoquinino-ntx/nkp-labs.git}"
+      rm -rf /opt/nkp-labs
+      git clone --depth 1 "${NKP_LABS_REPO}" /opt/nkp-labs
+      rm -rf /home/ubuntu/nkp-workspace
+      cp -a /opt/nkp-labs/bootstrap-machine/nkp-workspace /home/ubuntu/nkp-workspace
+      chown -R ubuntu:ubuntu /home/ubuntu/nkp-workspace
+      chmod 0755 /home/ubuntu/nkp-workspace/install-nkp.sh
+      echo "=== bootstrap toolchain ==="
+      docker --version
+      kubectl version --client
+      helm version
+      flux version --client || flux --version || true
+      k9s version
+      yq --version
+      nkp version || true
+      echo "workspace: /home/ubuntu/nkp-workspace"
+
+runcmd:
+  - [bash, /usr/local/sbin/install-nkp-bootstrap-tools.sh]
+
+final_message: "NKP bootstrap ready. SSH user ubuntu. Hostname nkp-bootstrap."

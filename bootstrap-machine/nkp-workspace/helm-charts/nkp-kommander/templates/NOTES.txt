@@ -1,0 +1,6 @@
+Generated the Kommander installer-config for **{{ .Values.clusterName }}**.
+
+The helmfile hook will:
+  1. read the ConfigMap `kommander-installer-config` -> data.kommander.yaml
+  2. write it to out/<cluster>/kommander.yaml
+  3. run `nkp install kommander --installer-config out/<cluster>/kommander.yaml --wait --wait-timeout 1h`

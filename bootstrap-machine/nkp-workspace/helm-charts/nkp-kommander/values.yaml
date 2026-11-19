@@ -1,0 +1,41 @@
+# Default values for nkp-kommander.
+clusterName: nkp-mgmt
+namespace: kommander
+clusterDomain: ntnxlab.local   # used when clusterHostname is empty
+clusterHostname: ""            # if empty -> <clusterName>.<clusterDomain>
+
+# Enabled Kommander platform apps (mirrors `nkp install kommander --init`).
+apps:
+  dex: {enabled: true}
+  dex-k8s-authenticator: {enabled: true}
+  kommander: {enabled: true}
+  kommander-ui: {enabled: true}
+  traefik: {enabled: true}
+  traefik-forward-auth-mgmt: {enabled: true}
+  kubefed: {enabled: true}
+  git-operator: {enabled: true}
+  external-secrets: {enabled: true}
+  gatekeeper: {enabled: true}
+  reloader: {enabled: true}
+  rook-ceph: {enabled: true}
+  rook-ceph-cluster: {enabled: true}
+  grafana-loki-v3: {enabled: true}
+  grafana-logging: {enabled: true}
+  logging-operator: {enabled: true}
+  kube-prometheus-stack: {enabled: true}
+  prometheus-adapter: {enabled: true}
+  velero: {enabled: true}
+  kubernetes-dashboard: {enabled: true}
+  kubetunnel: {enabled: true}
+  ai-navigator-app: {enabled: true}
+  cloudnative-pg: {enabled: true}
+  nkp-insights-management: {enabled: true}
+
+ageEncryptionSecretName: sops-age
+
+# Registry / Docker Hub (used to pull the kommander-appmanagement OCI chart).
+registry:
+  server: "https://index.docker.io/v1/"
+  username: ""
+  password: ""
+  email: ""

@@ -1,0 +1,168 @@
+apiVersion: clusters.nkp.nutanix.com/v1alpha1
+kind: NKPCluster
+metadata:
+  name: {{ .Values.clusterName }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    cluster.x-k8s.io/provider: nutanix
+    {{- if eq .Values.mode "management" }}
+    kommander.d2iq.io/host: "true"
+    {{- end }}
+    konvoy.d2iq.io/cluster-name: {{ .Values.clusterName }}
+    konvoy.d2iq.io/provider: nutanix
+spec:
+  capiCluster:
+    clusterNetwork:
+      pods:
+        cidrBlocks:
+        - {{ .Values.clusterNetwork.podsCidr }}
+      services:
+        cidrBlocks:
+        - {{ .Values.clusterNetwork.servicesCidr }}
+    topology:
+      classRef:
+        name: {{ .Values.clusterClassName }}
+      controlPlane:
+        replicas: {{ .Values.controlPlane.replicas }}
+      variables:
+      - name: clusterConfig
+        value:
+          addons:
+            ccm:
+              credentials:
+                secretRef:
+                  name: {{ .Values.clusterName }}-pc-credentials
+              strategy: HelmAddon
+            clusterAutoscaler:
+              strategy: HelmAddon
+            cni:
+              provider: Cilium
+              strategy: HelmAddon
+            cosi:
+              strategy: HelmAddon
+            csi:
+              defaultStorage:
+                provider: nutanix
+                storageClassConfig: volume
+              providers:
+                nutanix:
+                  credentials:
+                    secretRef:
+                      name: {{ .Values.clusterName }}-pc-credentials-for-csi
+                  storageClassConfigs:
+                    volume:
+                      allowExpansion: true
+                      parameters:
+                        csi.storage.k8s.io/fstype: {{ .Values.csi.fileSystem }}
+                        description: CSI StorageClass nutanix-volume for {{ .Values.clusterName }}
+                        flashMode: {{ .Values.csi.flashMode }}
+                        hypervisorAttached: {{ .Values.csi.hypervisorAttached }}
+                        storageContainer: {{ .Values.csi.storageContainer }}
+                        storageType: NutanixVolumes
+                      reclaimPolicy: {{ .Values.csi.reclaimPolicy }}
+                      volumeBindingMode: WaitForFirstConsumer
+                  strategy: HelmAddon
+              snapshotController:
+                strategy: HelmAddon
+            konnectorAgent:
+              credentials:
+                secretRef:
+                  name: {{ .Values.clusterName }}-pc-credentials-for-konnector-agent
+              enableKubeconfigUpload: true
+            nfd:
+              strategy: HelmAddon
+            serviceLoadBalancer:
+              configuration:
+                addressRanges:
+                - end: {{ .Values.serviceLoadBalancer.rangeEnd }}
+                  start: {{ .Values.serviceLoadBalancer.rangeStart }}
+              provider: MetalLB
+          controlPlane:
+            autoRenewCertificates:
+              daysBeforeExpiry: 180
+            nodeRegistration:
+              ignorePreflightErrors:
+              - SystemVerification
+            nutanix:
+              machineDetails:
+                bootType: uefi
+                cluster:
+                  name: {{ .Values.prism.prismElement }}
+                  type: name
+                image:
+                  name: {{ .Values.image }}
+                  type: name
+                memorySize: {{ .Values.controlPlane.memory }}
+                subnets:
+                - name: {{ .Values.prism.subnet }}
+                  type: name
+                systemDiskSize: {{ .Values.controlPlane.disk }}
+                vcpuSockets: {{ .Values.controlPlane.vcpu }}
+                vcpusPerSocket: 1
+          dns:
+            coreDNS: {}
+          encryptionAtRest:
+            providers:
+            - secretbox: {}
+          {{- if .Values.extraAPIServerCertSANs }}
+          extraAPIServerCertSANs:
+{{ toYaml .Values.extraAPIServerCertSANs | indent 12 }}
+          {{- end }}
+          kubeProxy:
+            mode: disabled
+          {{- if .Values.ntpServers }}
+          ntp:
+            servers:
+{{ toYaml .Values.ntpServers | indent 14 }}
+          {{- end }}
+          nutanix:
+            controlPlaneEndpoint:
+              host: {{ .Values.controlPlaneEndpointIp }}
+              port: 6443
+              virtualIP:
+                provider: KubeVIP
+            prismCentralEndpoint:
+              credentials:
+                secretRef:
+                  name: {{ .Values.clusterName }}-pc-credentials
+              insecure: {{ .Values.prism.insecure }}
+              url: {{ .Values.prism.endpoint }}
+          users:
+          - name: {{ .Values.sshUsername }}
+            sshAuthorizedKeys:
+            - {{ required "sshPublicKey is required: set the SSH public key in values" .Values.sshPublicKey | trim | quote }}
+            sudo: ALL=(ALL) NOPASSWD:ALL
+      version: {{ include "nkp-cluster.version" .Values.kubernetesVersion }}
+      workers:
+        machineDeployments:
+        - class: default-worker
+          name: md-0
+          # Size via CAPI autoscaler annotations (mutually exclusive with `replicas`); min = max = fixed size; the NKP UI reads these.
+          metadata:
+            annotations:
+              cluster.x-k8s.io/cluster-api-autoscaler-node-group-min-size: "{{ .Values.workers.replicas }}"
+              cluster.x-k8s.io/cluster-api-autoscaler-node-group-max-size: "{{ .Values.workers.replicas }}"
+          variables:
+            overrides:
+            - name: workerConfig
+              value:
+                nodeRegistration:
+                  ignorePreflightErrors:
+                  - SystemVerification
+                nutanix:
+                  machineDetails:
+                    bootType: uefi
+                    cluster:
+                      name: {{ .Values.prism.prismElement }}
+                      type: name
+                    image:
+                      name: {{ .Values.image }}
+                      type: name
+                    memorySize: {{ .Values.workers.memory }}
+                    subnets:
+                    - name: {{ .Values.prism.subnet }}
+                      type: name
+                    systemDiskSize: {{ .Values.workers.disk }}
+                    vcpuSockets: {{ .Values.workers.vcpu }}
+                    vcpusPerSocket: 1
+  version: {{ include "nkp-cluster.version" .Values.nkpVersion }}

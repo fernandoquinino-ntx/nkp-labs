@@ -1,0 +1,10 @@
+Applied the NKP **{{ .Values.mode }}** cluster objects for **{{ .Values.clusterName }}** (namespace {{ .Values.namespace }}).
+
+{{- if eq .Values.mode "management" }}
+This is the SELF-MANAGED bootstrap: NKPCluster (host) + 5 Secrets + the kommander bootstrap ConfigMap.
+Next: monitor until Ready → `nkp get kubeconfig` → pivot → `charts/nkp-kommander` → `nkp install kommander`.
+{{- else }}
+This is a MANAGED (workload) cluster: NKPCluster + 3 Secrets on the management cluster.
+Next: `kubectl -n {{ .Values.namespace }} get cluster {{ .Values.clusterName }}` until Provisioned →
+kubeconfig from the `{{ .Values.clusterName }}-kubeconfig` secret.
+{{- end }}

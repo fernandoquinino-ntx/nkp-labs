@@ -108,6 +108,7 @@ local.env.example   # documented defaults (copy to local.env)
 scripts/            # render.sh, apply.sh, cleanup.sh, dns-add.sh
 rendered/           # generated (gitignored)
 00-prereqs/ … 11-vault-eso/
+bootstrap-machine/  # Ubuntu cloud-init for an NKP jump host (docker, kubectl, helm, k9s, nkp)
 ```
 
 ## License

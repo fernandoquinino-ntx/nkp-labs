@@ -1,0 +1,6 @@
+apiVersion: v2
+name: nkp-kommander
+description: "Generates the Kommander installer-config (kind: Installation) used by `nkp install kommander --installer-config`. Also renders the registry/dockerhub secret used by the AppManagement."
+type: application
+version: 0.1.0
+appVersion: "2.19.0"

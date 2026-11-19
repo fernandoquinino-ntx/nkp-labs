@@ -1,0 +1,18 @@
+{{- if eq .Values.mode "management" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kommander-bootstrap-configuration
+  namespace: {{ .Values.namespace }}
+  labels:
+    cluster.x-k8s.io/provider: nutanix
+    clusterctl.cluster.x-k8s.io/move: ""
+    konvoy.d2iq.io/cluster-name: {{ .Values.clusterName }}
+    konvoy.d2iq.io/provider: nutanix
+data:
+  kommander-install.yaml: |-
+    version: {{ .Values.nkpVersion }}
+    airgapped:
+      enabled: false
+    clusterHostname: {{ .Values.clusterName }}.{{ .Values.clusterDomain }}
+{{- end }}

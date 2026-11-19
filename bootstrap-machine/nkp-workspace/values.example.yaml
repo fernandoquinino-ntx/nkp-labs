@@ -1,0 +1,72 @@
+# Default values for nkp-cluster.
+# `mode: management` (self-managed) or `mode: managed` (workload). The Terragrunt
+# units override these via values.yaml.
+
+# --- mode (required) ---------------------------------------------------------
+# management = self-managed (kind bootstrap; host label; 5 Secrets + kommander config)
+# managed    = workload (applied to the management cluster in a workspace ns)
+mode: management
+
+# --- identity ---------------------------------------------------------------
+clusterName: nkp-mgmt
+namespace: kommander
+clusterDomain: ntnxlab.local       # used by the kommander bootstrap ConfigMap (management only)
+
+# --- Prism Central -----------------------------------------------------------
+prism:
+  endpoint: "https://10.0.0.1:9440"
+  insecure: true
+  username: admin
+  password: "__PRISM_PASSWORD__"
+  prismCentralUuid: "00000000-0000-0000-0000-000000000000"   # management only (prism-central-metadata)
+  prismElement: "PRISM-ELEMENT-CLUSTER-NAME"
+  subnet: "data-subnet"
+
+# --- networking --------------------------------------------------------------
+clusterNetwork:
+  podsCidr: "10.95.0.0/16"
+  servicesCidr: "10.96.0.0/12"
+
+controlPlaneEndpointIp: "10.0.0.0"       # kube-vip VIP
+serviceLoadBalancer:
+  rangeStart: "10.0.0.0"
+  rangeEnd: "10.0.0.0"
+
+# --- versions / images -------------------------------------------------------
+kubernetesVersion: "v1.36.2"
+nkpVersion: "v2.19.0"
+clusterClassName: "nkp-nutanix-v2.19.0"
+image: "nkp-rocky-9.8-1.36.2"
+sshPublicKey: ""                          # REQUIRED
+sshUsername: konvoy
+
+# --- sizing ------------------------------------------------------------------
+controlPlane:
+  replicas: 3
+  vcpu: 4
+  memory: "16Gi"
+  disk: "80Gi"
+workers:
+  replicas: 2
+  vcpu: 8
+  memory: "32Gi"
+  disk: "80Gi"
+
+# --- extras ------------------------------------------------------------------
+extraAPIServerCertSANs: []
+ntpServers: []
+
+# --- csi ---------------------------------------------------------------------
+csi:
+  storageContainer: "SelfServiceContainer"
+  reclaimPolicy: "Delete"
+  fileSystem: "ext4"
+  flashMode: "DISABLED"
+  hypervisorAttached: "ENABLED"
+
+# --- registry / docker hub (consumed by helm-charts/nkp-kommander) ----------------
+registry:
+  server: "https://index.docker.io/v1/"
+  username: ""
+  password: ""
+  email: ""

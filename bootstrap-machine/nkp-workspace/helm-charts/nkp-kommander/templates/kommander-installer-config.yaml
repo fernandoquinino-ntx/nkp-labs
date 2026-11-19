@@ -1,0 +1,25 @@
+# InstallerConfig (kind: Installation) for `nkp install kommander --installer-config`.
+# Rendered as a ConfigMap `kommander-installer-config` in the namespace; the
+# helmfile hook extracts `data["kommander.yaml"]` to a local file and passes it
+# to `nkp install kommander --installer-config`.
+{{- $hostname := .Values.clusterHostname }}
+{{- if not $hostname }}{{ $hostname = printf "%s.%s" .Values.clusterName .Values.clusterDomain }}{{ end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kommander-installer-config
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: nkp-kommander
+    app.kubernetes.io/cluster: {{ .Values.clusterName }}
+data:
+  kommander.yaml: |
+    apiVersion: config.kommander.mesosphere.io/v1alpha1
+    kind: Installation
+    apps:
+{{- range $name, $cfg := .Values.apps }}
+      {{ $name }}:
+        enabled: {{ $cfg.enabled }}
+{{- end }}
+    ageEncryptionSecretName: {{ .Values.ageEncryptionSecretName }}
+    clusterHostname: {{ $hostname }}
