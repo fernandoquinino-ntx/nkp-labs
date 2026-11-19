@@ -36,6 +36,19 @@ CHART="${WORKSPACE}/helm-charts/nkp-cluster"
 command -v nkp >/dev/null 2>&1 || { echo "nkp CLI is not installed" >&2; exit 1; }
 command -v helm >/dev/null 2>&1 || { echo "helm is not installed" >&2; exit 1; }
 command -v kubectl >/dev/null 2>&1 || { echo "kubectl is not installed" >&2; exit 1; }
+command -v docker >/dev/null 2>&1 || { echo "docker is not installed" >&2; exit 1; }
+if ! docker info >/dev/null 2>&1; then
+  echo "docker is installed but this user cannot talk to the daemon." >&2
+  echo "Log out and back in so the docker group applies, then re-run." >&2
+  exit 1
+fi
+# The chart rejects an empty key at apply time (infra gotcha: sshPublicKey is required).
+# Fail before `nkp create bootstrap` so a bad values file does not leave a kind cluster behind.
+ssh_key="$(awk -F': ' '/^sshPublicKey:/ {print $2; exit}' "${VALUES}" | tr -d "\"'")"
+if [ -z "${ssh_key}" ] || [ "${ssh_key}" = "''" ]; then
+  echo "sshPublicKey is empty in ${VALUES}. Set the NKP node SSH public key before install." >&2
+  exit 1
+fi
 
 echo "=== [install-nkp] cluster=${CLUSTER} workspace=${WORKSPACE} ==="
 
@@ -125,6 +138,23 @@ else
     --kubeconfig "${WORK_KC}" \
     --wait --wait-timeout "${INSTALL_TIMEOUT}" \
     || echo "nkp install kommander returned non-zero (still reconciling)"
+fi
+
+# Same follow-up as nkp-infra-tf kommander.sh: point Docker Hub OCI repos at
+# dockerhub-auth, or Flux pulls anonymously and hits the rate limit.
+if kubectl -n "${NAMESPACE}" get secret dockerhub-auth >/dev/null 2>&1; then
+  echo "=== patching Docker Hub OCIRepository secretRef ==="
+  kubectl -n "${NAMESPACE}" get ocirepository \
+    -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.url}{"\n"}{end}' 2>/dev/null \
+    | awk '$2 ~ /docker\.io/ {print $1}' \
+    | while read -r repo; do
+        [ -n "${repo}" ] || continue
+        kubectl -n "${NAMESPACE}" patch ocirepository "${repo}" --type merge \
+          -p '{"spec":{"secretRef":{"name":"dockerhub-auth"}}}' >/dev/null 2>&1 \
+          && echo "  patched ${repo}"
+      done
+else
+  echo "no dockerhub-auth secret. Set registry.username and registry.password in values.local.yaml or Kommander image pulls stay anonymous."
 fi
 
 echo "=== done. kubeconfig: ${WORK_KC} ==="
