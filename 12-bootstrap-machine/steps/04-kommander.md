@@ -26,4 +26,4 @@ Register DNS for `<clusterName>.<clusterDomain>` at the ingress address before K
 with `no such host`.
 
 NKP installs its own Flux (the Kommander git-operator) on the cluster. The Flux CLI on the jump host
-is the one installed by cloud-init from https://fluxcd.io/install.sh.
+is the v2.10.0 binary that cloud-init installs from the flux2 GitHub release.

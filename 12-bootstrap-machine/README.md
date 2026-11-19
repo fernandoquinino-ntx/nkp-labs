@@ -44,6 +44,7 @@ Use one path for a given cluster name.
 | 04 | [Kommander](steps/04-kommander.md) | turn on `INSTALL_KOMMANDER` and the Docker Hub secret |
 | 05 | [`nkp create cluster`](steps/05-create-cluster.md) | fill `create-cluster.env` and run `scripts/create-cluster.sh` |
 | 06 | [Air gap and registry](steps/06-airgap-registry.md) | download the offline bundle and run a TLS registry the cluster trusts |
+| 07 | [Offline bootstrap](steps/07-offline-bootstrap.md) | VM without internet: get the CI bundle on a client, push it, install from it |
 
 ## Files
 
@@ -53,6 +54,10 @@ Use one path for a given cluster name.
 | `scripts/bootstrap-host.sh` | the host install: packages, disk grow, Docker, CLIs, workspace, registry image. Resumes after a failure or a restart |
 | `scripts/update-workspace.sh` | `nkp-update` on the VM. Pulls the latest lab into `nkp-workspace` without touching your files. `--rerun` runs the bootstrap again |
 | `scripts/expand-root-disk.sh` | grows the root partition or LV. Safe to run again |
+| `scripts/get-offline-bundle.sh` | client: download the latest CI offline bundle (or build it here) |
+| `scripts/build-offline-bundle.sh` | client or CI: installers, Ubuntu packages, `registry:2`, lab snapshot in one tarball |
+| `scripts/push-offline-bundle.sh` | client: copy the bundle (and optionally the air-gapped bundle) to the VM and start the install |
+| `scripts/verify-offline-bundle.sh` | install a bundle in a container with no network (CI runs it) |
 | `env.example` | installer knobs (`CLUSTER_NAME`, `EXPECTED`, `INSTALL_KOMMANDER`). Copy to `env` |
 | `values.example.yaml` | NKP cluster values. Copy to `values.local.yaml` (gitignored) |
 | `scripts/install-nkp.sh` | Helm path: `nkp create bootstrap`, chart, kubeconfig, pivot, optional Kommander |
@@ -88,8 +93,8 @@ Use one path for a given cluster name.
 | Ubuntu 24.04 amd64 cloud image | https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img |
 | NKP 2.19.1 CLI (linux amd64) | https://downloads.d2iq.com/dkp/v2.19.1/nkp_v2.19.1_linux_amd64.tar.gz |
 | kubectl v1.36.2 (linux amd64) | https://dl.k8s.io/release/v1.36.2/bin/linux/amd64/kubectl |
-| Helm 3 install script | https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 |
-| Flux CLI install script | https://fluxcd.io/install.sh |
+| Helm v3.22.1 (linux amd64) | https://get.helm.sh/helm-v3.22.1-linux-amd64.tar.gz |
+| Flux v2.10.0 (linux amd64) | https://github.com/fluxcd/flux2/releases/download/v2.10.0/flux_2.10.0_linux_amd64.tar.gz |
 | k9s v0.51.0 (linux amd64) | https://github.com/derailed/k9s/releases/download/v0.51.0/k9s_Linux_amd64.tar.gz |
 | yq v4.47.1 (linux amd64) | https://github.com/mikefarah/yq/releases/download/v4.47.1/yq_linux_amd64 |
 | Docker Engine (Ubuntu) | https://download.docker.com/linux/ubuntu |

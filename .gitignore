@@ -42,3 +42,4 @@ opencode-rag.json
 .opencode/rag_db/
 .opencode/rag_db.bak.*/
 .opencode/*.log
+12-bootstrap-machine/dist/

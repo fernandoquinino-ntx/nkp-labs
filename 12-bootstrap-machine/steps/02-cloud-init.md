@@ -25,8 +25,8 @@ https://raw.githubusercontent.com/fernandoquinino-ntx/nkp-labs/main/12-bootstrap
 | Docker Engine, compose, buildx | https://download.docker.com/linux/ubuntu |
 | `nkp` v2.19.1 | https://downloads.d2iq.com/dkp/v2.19.1/nkp_v2.19.1_linux_amd64.tar.gz |
 | `kubectl` v1.36.2 | https://dl.k8s.io/release/v1.36.2/bin/linux/amd64/kubectl |
-| Helm 3 | https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 |
-| Flux CLI | https://fluxcd.io/install.sh |
+| Helm v3.22.1 | https://get.helm.sh/helm-v3.22.1-linux-amd64.tar.gz |
+| Flux v2.10.0 | https://github.com/fluxcd/flux2/releases/download/v2.10.0/flux_2.10.0_linux_amd64.tar.gz |
 | k9s v0.51.0 | https://github.com/derailed/k9s/releases/download/v0.51.0/k9s_Linux_amd64.tar.gz |
 | yq v4.47.1 | https://github.com/mikefarah/yq/releases/download/v4.47.1/yq_linux_amd64 |
 

@@ -17,6 +17,9 @@
 # re-runs the service and it continues from the first unfinished step.
 # The air-gapped bundle downloads afterwards in nkp-airgap-download.service and
 # resumes from the last byte. Check both with: nkp-bootstrap-status
+#
+# No internet on this VM? Set NKP_MODE=offline below and push the offline bundle from a
+# client: steps/07-offline-bootstrap.md.
 
 # --- EDIT: guest name (match the Prism VM name) ---
 preserve_hostname: false
@@ -50,62 +53,107 @@ chpasswd:
       password: ChangeMe-NKP-Bootstrap
       type: text
 
-package_update: true
+# bootstrap-host.sh runs apt itself (online), or uses only the bundle (offline).
+package_update: false
 package_upgrade: false
 
 write_files:
-  # EDIT: set NKP_SKIP_AIRGAP=true for a connected install (no 33 GiB download).
+  # EDIT: NKP_MODE=online downloads everything from the internet.
+  #       NKP_MODE=offline installs only from the bundle you push with
+  #       scripts/push-offline-bundle.sh (no internet needed on this VM).
+  # EDIT: NKP_SKIP_AIRGAP=true skips the 33 GiB download in online mode.
   - path: /etc/default/nkp-bootstrap
     permissions: "0644"
     owner: root:root
     content: |
+      NKP_MODE=online
       NKP_VERSION=v2.19.1
       NKP_SKIP_AIRGAP=false
       NKP_LABS_REPO=https://github.com/fernandoquinino-ntx/nkp-labs.git
       NKP_LABS_REF=main
+      NKP_OFFLINE_DIR=/opt/nkp-offline
+      NKP_OFFLINE_DROP=/home/ubuntu
 
-  # Small on purpose. The real install is scripts/bootstrap-host.sh in nkp-labs, fetched
-  # fresh on every run, so a fix pushed to git applies at the next run without a new paste.
+  # Small on purpose. The real install is scripts/bootstrap-host.sh in nkp-labs: fetched
+  # fresh from git on every run (online), or taken from the pushed bundle (offline).
   - path: /usr/local/sbin/install-nkp-bootstrap-tools.sh
     permissions: "0755"
     owner: root:root
     content: |
       #!/bin/bash
-      # Download the latest bootstrap scripts from nkp-labs, then run them. If GitHub cannot
-      # be reached, run the copy from the last good download. With no copy at all, exit 1
-      # and systemd tries again in 60s.
+      # Online: download the latest bootstrap scripts from nkp-labs, then run them. If GitHub
+      # cannot be reached, run the copy from the last good download.
+      # Offline: wait for nkp-bootstrap-offline-*.tar.gz in NKP_OFFLINE_DROP, check it,
+      # unpack it to NKP_OFFLINE_DIR, then run the scripts inside it.
+      # With nothing to run yet, exit 1 and systemd tries again in 60s.
       set -uo pipefail
       export PATH="$PATH:/usr/sbin:/sbin:/usr/bin:/bin"
       [ -f /etc/default/nkp-bootstrap ] && . /etc/default/nkp-bootstrap
-      RAW="${NKP_LABS_RAW:-https://raw.githubusercontent.com/fernandoquinino-ntx/nkp-labs}/${NKP_LABS_REF:-main}/12-bootstrap-machine/scripts"
       LIB="${NKP_LIB_DIR:-/usr/local/lib/nkp-bootstrap}"
       LOG="${NKP_LOG:-/var/log/nkp-bootstrap.log}"
+      SCRIPTS="bootstrap-host.sh expand-root-disk.sh update-workspace.sh"
       mkdir -p "${LIB}"
       log() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [loader] $*" | tee -a "${LOG}"; }
-      online=true
-      for f in bootstrap-host.sh expand-root-disk.sh update-workspace.sh; do
-        got=false
-        if [ "${online}" = true ]; then
-          for i in 1 2 3 4; do
-            # The query string skips the raw.githubusercontent.com cache (about 5 min).
-            if curl -fsSL --connect-timeout 15 --max-time 120 -o "${LIB}/${f}.new" "${RAW}/${f}?t=$(date +%s)" \
-                && bash -n "${LIB}/${f}.new"; then
-              chmod 0755 "${LIB}/${f}.new"
-              mv -f "${LIB}/${f}.new" "${LIB}/${f}"
-              got=true
-              break
+      if [ "${NKP_MODE:-online}" = "offline" ]; then
+        OFF="${NKP_OFFLINE_DIR:-/opt/nkp-offline}"
+        DROP="${NKP_OFFLINE_DROP:-/home/ubuntu}"
+        bundle="$(ls -t "${DROP}"/nkp-bootstrap-offline-*.tar.gz 2>/dev/null | head -n1)"
+        if [ -n "${bundle}" ]; then
+          sig="$(basename "${bundle}") $(stat -c '%s %Y' "${bundle}")"
+          if [ "${sig}" != "$(cat "${OFF}/.source" 2>/dev/null)" ]; then
+            log "unpacking ${bundle}"
+            rm -rf "${OFF}.new"
+            mkdir -p "${OFF}.new"
+            if tar -xzf "${bundle}" -C "${OFF}.new" --strip-components=1 \
+                && (cd "${OFF}.new" && sha256sum -c --quiet SHA256SUMS); then
+              rm -rf "${OFF}"
+              mv "${OFF}.new" "${OFF}"
+              echo "${sig}" > "${OFF}/.source"
+              log "bundle ok: $(grep -E '^(git_commit|built)=' "${OFF}/MANIFEST.txt" | tr '\n' ' ')"
+            else
+              rm -rf "${OFF}.new"
+              log "bundle ${bundle} is damaged (tar or sha256). Push it again."
+              [ -f "${OFF}/SHA256SUMS" ] || exit 1
+              log "running the bundle unpacked before"
             fi
-            sleep $((i * 5))
-          done
+          fi
         fi
-        rm -f "${LIB}/${f}.new"
-        if [ "${got}" = true ]; then
-          log "fetched latest ${f} from ${RAW}"
-        else
-          online=false
-          log "could not fetch ${f}. Using the cached copy if there is one."
+        if [ ! -f "${OFF}/SHA256SUMS" ]; then
+          log "waiting for nkp-bootstrap-offline-*.tar.gz in ${DROP}. Push it with scripts/push-offline-bundle.sh. systemd checks again in 60s."
+          exit 1
         fi
-      done
+        for f in ${SCRIPTS}; do
+          install -m 0755 "${OFF}/labs/12-bootstrap-machine/scripts/${f}" "${LIB}/${f}.new"
+          mv -f "${LIB}/${f}.new" "${LIB}/${f}"
+        done
+        export NKP_OFFLINE_DIR="${OFF}"
+      else
+        RAW="${NKP_LABS_RAW:-https://raw.githubusercontent.com/fernandoquinino-ntx/nkp-labs}/${NKP_LABS_REF:-main}/12-bootstrap-machine/scripts"
+        online=true
+        for f in ${SCRIPTS}; do
+          got=false
+          if [ "${online}" = true ]; then
+            for i in 1 2 3 4; do
+              # The query string skips the raw.githubusercontent.com cache (about 5 min).
+              if curl -fsSL --connect-timeout 15 --max-time 120 -o "${LIB}/${f}.new" "${RAW}/${f}?t=$(date +%s)" \
+                  && bash -n "${LIB}/${f}.new"; then
+                chmod 0755 "${LIB}/${f}.new"
+                mv -f "${LIB}/${f}.new" "${LIB}/${f}"
+                got=true
+                break
+              fi
+              sleep $((i * 5))
+            done
+          fi
+          rm -f "${LIB}/${f}.new"
+          if [ "${got}" = true ]; then
+            log "fetched latest ${f} from ${RAW}"
+          else
+            online=false
+            log "could not fetch ${f}. Using the cached copy if there is one."
+          fi
+        done
+      fi
       ln -sf "${LIB}/update-workspace.sh" "${NKP_BIN_DIR:-/usr/local/bin}/nkp-update"
       if [ ! -f "${LIB}/bootstrap-host.sh" ]; then
         log "no bootstrap-host.sh yet (no internet on the first run). systemd retries in 60s."

@@ -91,4 +91,4 @@ Then set `clusterConfig.imageRegistries` and `globalImageRegistryMirror` to
 fragment. Applying it rolls nodes. This is the same shape as
 `nkp-deployer/configure/registry/runbooks/01-registry-not-set.md`.
 
-**Back:** [05 — nkp create cluster](05-create-cluster.md).
+**Next:** [07 — offline bootstrap](07-offline-bootstrap.md).

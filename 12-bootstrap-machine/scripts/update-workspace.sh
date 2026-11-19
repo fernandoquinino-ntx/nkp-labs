@@ -5,6 +5,9 @@
 #   nkp-update            refresh the workspace and the bootstrap scripts
 #   nkp-update --rerun    also run nkp-bootstrap.service again (finished steps are skipped)
 #
+# With NKP_MODE=offline the source is the lab inside the last pushed offline bundle
+# (push a new one with push-offline-bundle.sh, which also re-runs the bootstrap).
+#
 # Nothing of yours is deleted: env, values.local.yaml, create-cluster.env, kubeconfigs,
 # registry/ and airgap/ are not in git. Files that are in git are overwritten with the
 # latest version, so keep your edits in the gitignored copies, not in *.example files.
@@ -36,24 +39,31 @@ main() {
     echo "${line}" >> "${log}" 2>/dev/null || true
   }
 
-  command -v git >/dev/null 2>&1 || { say "git is not installed"; return 1; }
-  say "repo=${repo} ref=${ref}"
-  for i in 1 2 3 4 5; do
-    rm -rf "${labs}.new"
-    if git clone -q --depth 1 --branch "${ref}" "${repo}" "${labs}.new"; then
-      break
-    fi
-    if [ "${i}" -eq 5 ]; then
+  if [ "${NKP_MODE:-online}" = "offline" ]; then
+    # The loader unpacks each pushed bundle. Its lab snapshot is the source here.
+    src="${NKP_OFFLINE_DIR:-/opt/nkp-offline}/labs/12-bootstrap-machine"
+    [ -d "${src}/scripts" ] || { say "no lab in the offline bundle (${src}). Push a bundle first."; return 1; }
+    say "offline mode: workspace from the bundle ($(awk -F= '$1 == "git_commit" {print $2}' "${src}/../../MANIFEST.txt" 2>/dev/null))"
+  else
+    command -v git >/dev/null 2>&1 || { say "git is not installed"; return 1; }
+    say "repo=${repo} ref=${ref}"
+    for i in 1 2 3 4 5; do
       rm -rf "${labs}.new"
-      say "git clone failed 5 times (no internet or GitHub down). Nothing changed."
-      return 1
-    fi
-    say "git clone failed (try ${i}/5), retrying in $((i * 10))s"
-    sleep $((i * 10))
-  done
-  rm -rf "${labs}"
-  mv "${labs}.new" "${labs}"
-  src="${labs}/12-bootstrap-machine"
+      if git clone -q --depth 1 --branch "${ref}" "${repo}" "${labs}.new"; then
+        break
+      fi
+      if [ "${i}" -eq 5 ]; then
+        rm -rf "${labs}.new"
+        say "git clone failed 5 times (no internet or GitHub down). Nothing changed."
+        return 1
+      fi
+      say "git clone failed (try ${i}/5), retrying in $((i * 10))s"
+      sleep $((i * 10))
+    done
+    rm -rf "${labs}"
+    mv "${labs}.new" "${labs}"
+    src="${labs}/12-bootstrap-machine"
+  fi
 
   mkdir -p "${ws}"
   cp -a "${src}/." "${ws}/"
@@ -68,7 +78,9 @@ main() {
   done
   ln -sf "${lib}/update-workspace.sh" "${bin}/nkp-update"
 
-  say "workspace ${ws} now at $(git -C "${labs}" log -1 --format='%h %cd %s' --date=format:'%Y-%m-%d %H:%M')"
+  if [ "${NKP_MODE:-online}" != "offline" ]; then
+    say "workspace ${ws} now at $(git -C "${labs}" log -1 --format='%h %cd %s' --date=format:'%Y-%m-%d %H:%M')"
+  fi
 
   if [ "${1:-}" = "--rerun" ]; then
     rm -f "${state}/complete"

@@ -1,0 +1,43 @@
+name: offline-bundle
+
+# Builds the lab 12 offline bootstrap bundle (installers, Ubuntu 24.04 packages, registry
+# image, lab snapshot) and proves it installs with no network before uploading it.
+# Download the latest one on a client with: 12-bootstrap-machine/scripts/get-offline-bundle.sh
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "12-bootstrap-machine/**"
+      - ".github/workflows/offline-bundle.yml"
+
+concurrency:
+  group: offline-bundle
+  cancel-in-progress: true
+
+jobs:
+  bundle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build the offline bundle
+        id: build
+        run: |
+          bash 12-bootstrap-machine/scripts/build-offline-bundle.sh "$PWD/dist"
+          echo "name=$(basename dist/*.tar.gz .tar.gz)" >> "$GITHUB_OUTPUT"
+
+      - name: Install it in Ubuntu 24.04 with no network
+        run: bash 12-bootstrap-machine/scripts/verify-offline-bundle.sh "dist/${{ steps.build.outputs.name }}.tar.gz"
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ${{ steps.build.outputs.name }}
+          path: |
+            dist/${{ steps.build.outputs.name }}.tar.gz
+            dist/${{ steps.build.outputs.name }}.tar.gz.sha256
+          retention-days: 30
+          compression-level: 0
+          if-no-files-found: error
