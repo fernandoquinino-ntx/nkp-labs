@@ -43,6 +43,7 @@ Use one path for a given cluster name.
 | 03 | [Helm path](steps/03-install-cluster.md) | fill `values.local.yaml` and run `scripts/install-nkp.sh` |
 | 04 | [Kommander](steps/04-kommander.md) | turn on `INSTALL_KOMMANDER` and the Docker Hub secret |
 | 05 | [`nkp create cluster`](steps/05-create-cluster.md) | fill `create-cluster.env` and run `scripts/create-cluster.sh` |
+| 06 | [Air gap and registry](steps/06-airgap-registry.md) | download the offline bundle and run a TLS registry the cluster trusts |
 
 ## Files
 
@@ -54,6 +55,9 @@ Use one path for a given cluster name.
 | `scripts/install-nkp.sh` | Helm path: `nkp create bootstrap`, chart, kubeconfig, pivot, optional Kommander |
 | `create-cluster.env.example` | CLI path values. Copy to `create-cluster.env` (gitignored) |
 | `scripts/create-cluster.sh` | CLI path: `nkp create cluster nutanix --self-managed` |
+| `scripts/fetch-airgap-bundle.sh` | download the 2.19 air-gapped bundle (~35 GiB, resumable) |
+| `scripts/setup-local-registry.sh` | self-signed CA, registry certificate, `registry:2` on this host |
+| `scripts/trust-registry.sh` | Opaque Secret `username` / `password` / `ca.crt` for CAREN |
 | `helm-charts/nkp-cluster/` | `NKPCluster` plus Prism secrets |
 | `helm-charts/nkp-kommander/` | Kommander installer ConfigMap and the Docker Hub secret |
 
@@ -87,6 +91,7 @@ Use one path for a given cluster name.
 | yq v4.47.1 (linux amd64) | https://github.com/mikefarah/yq/releases/download/v4.47.1/yq_linux_amd64 |
 | Docker Engine (Ubuntu) | https://download.docker.com/linux/ubuntu |
 | NKP 2.19 release note | https://next.nutanix.com/product-updates/nutanix-kubernetes-platform-nkp-2-19-45966 |
+| NKP 2.19 air-gapped bundle | https://downloads.d2iq.com/dkp/v2.19.0/nkp-air-gapped-bundle_v2.19.0_linux_amd64.tar.gz |
 
 NKP 2.19 defaults to Kubernetes **1.36.2** (1.35.x is still supported). The public CLI archive is
 **linux amd64** only. sha256 of `nkp_v2.19.0_linux_amd64.tar.gz`:

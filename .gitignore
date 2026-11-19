@@ -5,6 +5,8 @@ local.env
 12-bootstrap-machine/create-cluster.env
 12-bootstrap-machine/values.local.yaml
 12-bootstrap-machine/kommander.yaml
+12-bootstrap-machine/registry/
+12-bootstrap-machine/airgap/
 rendered/
 
 # kubeconfigs you generate while experimenting (e.g. lab 06: ./lab-kubeconfig)
