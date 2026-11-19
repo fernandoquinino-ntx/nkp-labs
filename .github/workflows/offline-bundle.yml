@@ -23,10 +23,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: cloud-init-offline.yaml matches cloud-init.yaml
+        run: bash 12-bootstrap-machine/scripts/make-offline-cloud-init.sh --check
+
       - name: Build the offline bundle
         id: build
         run: |
           bash 12-bootstrap-machine/scripts/build-offline-bundle.sh "$PWD/dist"
+          cp 12-bootstrap-machine/cloud-init-offline.yaml dist/
           echo "name=$(basename dist/*.tar.gz .tar.gz)" >> "$GITHUB_OUTPUT"
 
       - name: Install it in Ubuntu 24.04 with no network
@@ -38,6 +42,7 @@ jobs:
           path: |
             dist/${{ steps.build.outputs.name }}.tar.gz
             dist/${{ steps.build.outputs.name }}.tar.gz.sha256
+            dist/cloud-init-offline.yaml
           retention-days: 30
           compression-level: 0
           if-no-files-found: error

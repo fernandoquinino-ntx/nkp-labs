@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Prove an offline bundle installs with no network: run the cloud-init loader in
-# NKP_MODE=offline inside an Ubuntu 24.04 container started with --network none.
+# Prove an offline bundle installs with no network: run the loader from
+# cloud-init-offline.yaml inside an Ubuntu 24.04 container started with --network none.
 # systemd and the Docker daemon do not exist in a container, so systemctl is a stand-in
 # and the first run stops at `docker load`. The second run adds a docker stand-in for
 # `load` only and must finish, which also checks that finished steps are skipped.
@@ -14,21 +14,22 @@ LAB="$(cd "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "${TMP}"' EXIT
 
-# The loader exactly as cloud-init writes it.
-python3 - "${LAB}/cloud-init.yaml" "${TMP}/loader.sh" <<'PY'
+# The loader and /etc/default/nkp-bootstrap exactly as the offline paste writes them.
+python3 - "${LAB}/cloud-init-offline.yaml" "${TMP}" <<'PY'
 import sys, yaml
 d = yaml.safe_load(open(sys.argv[1]))
-f = [w for w in d["write_files"] if w["path"].endswith("install-nkp-bootstrap-tools.sh")][0]
-open(sys.argv[2], "w").write(f["content"])
+files = {w["path"]: w["content"] for w in d["write_files"]}
+open(sys.argv[2] + "/loader.sh", "w").write(files["/usr/local/sbin/install-nkp-bootstrap-tools.sh"])
+open(sys.argv[2] + "/default", "w").write(files["/etc/default/nkp-bootstrap"])
 PY
+grep -q '^NKP_MODE=offline$' "${TMP}/default" || { echo "cloud-init-offline.yaml is not NKP_MODE=offline" >&2; exit 1; }
 
 docker run --rm --network none --platform linux/amd64 \
-  -v "${BUNDLE}:/drop/$(basename "${BUNDLE}"):ro" -v "${TMP}/loader.sh:/loader.sh:ro" \
+  -v "${BUNDLE}:/drop/$(basename "${BUNDLE}"):ro" -v "${TMP}/loader.sh:/loader.sh:ro" -v "${TMP}/default:/default:ro" \
   ubuntu:24.04 bash -Eeuo pipefail -c '
     id ubuntu >/dev/null 2>&1 || useradd -m -s /bin/bash ubuntu
     cp /drop/*.tar.gz /home/ubuntu/
-    printf "%s\n" NKP_MODE=offline NKP_OFFLINE_DIR=/opt/nkp-offline NKP_OFFLINE_DROP=/home/ubuntu \
-      > /etc/default/nkp-bootstrap
+    cp /default /etc/default/nkp-bootstrap
     printf "#!/bin/sh\necho \"systemctl (stand-in) \$*\"\n" > /usr/local/sbin/systemctl
     chmod +x /usr/local/sbin/systemctl
 
