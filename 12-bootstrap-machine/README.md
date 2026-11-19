@@ -55,7 +55,7 @@ Use one path for a given cluster name.
 | `scripts/install-nkp.sh` | Helm path: `nkp create bootstrap`, chart, kubeconfig, pivot, optional Kommander |
 | `create-cluster.env.example` | CLI path values. Copy to `create-cluster.env` (gitignored) |
 | `scripts/create-cluster.sh` | CLI path: `nkp create cluster nutanix --self-managed` |
-| `scripts/fetch-airgap-bundle.sh` | download the 2.19 air-gapped bundle (~35 GiB, resumable) |
+| `scripts/fetch-airgap-bundle.sh` | download the 2.19.1 air-gapped bundle (~33 GiB). Cloud-init runs this. Log: `/var/log/nkp-bootstrap.log` |
 | `scripts/setup-local-registry.sh` | self-signed CA, registry certificate, `registry:2` on this host |
 | `scripts/trust-registry.sh` | Opaque Secret `username` / `password` / `ca.crt` for CAREN |
 | `helm-charts/nkp-cluster/` | `NKPCluster` plus Prism secrets |

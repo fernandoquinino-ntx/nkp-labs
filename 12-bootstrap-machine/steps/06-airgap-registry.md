@@ -1,8 +1,10 @@
 # 06 — Air-gapped bundle and a local registry
 
-Cloud-init installs the CLIs while the jump host can still reach the internet. Download the offline
-bundle **after** that, before you remove the route. The bundle does not fit on a 40 GiB disk. Give
-the VM about **200 GiB** if the tarball stays on the bastion.
+Cloud-init installs the CLIs, then downloads this bundle before it finishes. The bundle does not fit
+on a 40 GiB disk. Give the VM about **200 GiB**. If the download fails, read
+`/var/log/nkp-bootstrap.log` and `/var/log/cloud-init-output.log`. Re-run
+`./scripts/fetch-airgap-bundle.sh` to resume. Set `SKIP_AIRGAP=true` in the cloud-init environment
+only when you will copy the tarball onto the VM yourself.
 
 ## Bundle
 

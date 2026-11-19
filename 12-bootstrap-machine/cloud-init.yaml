@@ -97,6 +97,13 @@ write_files:
       #!/bin/bash
       set -euo pipefail
       export PATH="$PATH:/usr/sbin:/sbin:/usr/bin:/bin"
+      LOG=/var/log/nkp-bootstrap.log
+      touch "${LOG}"
+      chmod 0644 "${LOG}"
+      exec > >(tee -a "${LOG}") 2>&1
+      echo "===== $(date -u +%Y-%m-%dT%H:%M:%SZ) nkp bootstrap start pid=$$ ====="
+      trap 'rc=$?; echo "===== FAILED line ${LINENO} exit ${rc} cmd=${BASH_COMMAND} at $(date -u +%Y-%m-%dT%H:%M:%SZ) ====="; exit ${rc}' ERR
+      set -x
       NKP_VERSION="${NKP_VERSION:-v2.19.1}"
       KUBECTL_VERSION="${KUBECTL_VERSION:-v1.36.2}"
       K9S_VERSION="${K9S_VERSION:-v0.51.0}"
@@ -194,8 +201,18 @@ write_files:
       yq --version
       nkp version || true
       echo "workspace: /home/ubuntu/nkp-workspace"
+      if [ "${SKIP_AIRGAP:-false}" != "true" ]; then
+        echo "===== $(date -u +%Y-%m-%dT%H:%M:%SZ) air-gapped bundle ====="
+        AIRGAP_DIR=/home/ubuntu/nkp-workspace/airgap /home/ubuntu/nkp-workspace/scripts/fetch-airgap-bundle.sh
+        chown -R ubuntu:ubuntu /home/ubuntu/nkp-workspace/airgap
+      else
+        echo "SKIP_AIRGAP=true — bundle not downloaded"
+      fi
+      set +x
+      echo "===== $(date -u +%Y-%m-%dT%H:%M:%SZ) nkp bootstrap done ====="
+      echo "log: ${LOG}"
 
 runcmd:
   - [bash, /usr/local/sbin/install-nkp-bootstrap-tools.sh]
 
-final_message: "NKP bootstrap ready. SSH user ubuntu. Hostname nkp-bootstrap."
+final_message: "NKP bootstrap ready. SSH user ubuntu. Log /var/log/nkp-bootstrap.log and /var/log/cloud-init-output.log."
