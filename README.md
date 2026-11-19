@@ -22,6 +22,7 @@ The manifests are **portable templates** (they use `${PLACEHOLDERS}`); you suppl
 | 09 | [09-traefik-oidc-okta](09-traefik-oidc-okta/) | protect an app with **Okta OIDC** using the **Traefik OIDC plugin middleware** — a hands-on lab with a **page per step** (`steps/01…10`), no oauth2-proxy, no Dex |
 | 10 | [10-vault-install](10-vault-install/) | install **HashiCorp Vault** (dev / standalone / HA), **initialize + unseal** it, enable a **KV v2** engine and reach the UI — the prerequisite for lab 11 |
 | 11 | [11-vault-eso](11-vault-eso/) | pull a secret from **Vault** with the **External Secrets Operator** — the **`ClusterSecretStore`** (the "credential store") set via an **NKP `AppDeployment` override** (`extraObjects`), so it is **visible/editable in the UI** |
+| 12 | [12-bootstrap-machine](12-bootstrap-machine/) | build the **Ubuntu jump host** (cloud-init) and install a **self-managed NKP 2.19** cluster from the Helm charts |
 
 ## Procedures (step-by-step, copy-paste)
 
@@ -107,8 +108,7 @@ Prefer the raw commands? `./scripts/render.sh <lab>` writes `rendered/<lab>/` an
 local.env.example   # documented defaults (copy to local.env)
 scripts/            # render.sh, apply.sh, cleanup.sh, dns-add.sh
 rendered/           # generated (gitignored)
-00-prereqs/ … 11-vault-eso/
-bootstrap-machine/  # Ubuntu cloud-init for an NKP jump host (docker, kubectl, helm, k9s, nkp)
+00-prereqs/ … 12-bootstrap-machine/
 ```
 
 ## License

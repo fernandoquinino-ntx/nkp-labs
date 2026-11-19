@@ -181,9 +181,10 @@ write_files:
       rm -rf /opt/nkp-labs
       git clone --depth 1 "${NKP_LABS_REPO}" /opt/nkp-labs
       rm -rf /home/ubuntu/nkp-workspace
-      cp -a /opt/nkp-labs/bootstrap-machine/nkp-workspace /home/ubuntu/nkp-workspace
+      mkdir -p /home/ubuntu/nkp-workspace
+      cp -a /opt/nkp-labs/12-bootstrap-machine/. /home/ubuntu/nkp-workspace/
       chown -R ubuntu:ubuntu /home/ubuntu/nkp-workspace
-      chmod 0755 /home/ubuntu/nkp-workspace/install-nkp.sh
+      chmod 0755 /home/ubuntu/nkp-workspace/scripts/install-nkp.sh
       echo "=== bootstrap toolchain ==="
       docker --version
       kubectl version --client

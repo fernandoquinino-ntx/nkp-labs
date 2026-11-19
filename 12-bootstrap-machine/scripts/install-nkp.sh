@@ -5,7 +5,7 @@
 set -Eeuo pipefail
 trap 'echo "ERROR: [install-nkp] failed at line $LINENO on command: $BASH_COMMAND" >&2' ERR
 
-WORKSPACE="$(cd "$(dirname "$0")" && pwd)"
+WORKSPACE="$(cd "$(dirname "$0")/.." && pwd)"
 cd "${WORKSPACE}"
 
 if [ -f "${WORKSPACE}/env" ]; then

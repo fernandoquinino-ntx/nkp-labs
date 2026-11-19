@@ -1,9 +1,9 @@
 # your real values + generated output — NEVER commit these
 local.env
 .env
-bootstrap-machine/nkp-workspace/env
-bootstrap-machine/nkp-workspace/values.local.yaml
-bootstrap-machine/nkp-workspace/kommander.yaml
+12-bootstrap-machine/env
+12-bootstrap-machine/values.local.yaml
+12-bootstrap-machine/kommander.yaml
 rendered/
 
 # kubeconfigs you generate while experimenting (e.g. lab 06: ./lab-kubeconfig)
