@@ -6,9 +6,15 @@
 # Prism VM name is the Name field in the wizard. This file only sets the name
 # inside the guest. Use the same string in both places.
 #
-# Before pasting, edit the four lines marked EDIT.
+# Before pasting, edit the lines marked EDIT.
 # Ubuntu 24.04 cloud image is the primary target. The same file also grows a
 # Rocky LVM root disk and installs packages with dnf when that is the image.
+#
+# The install runs in nkp-bootstrap.service, not inside cloud-init. Each finished
+# step leaves /var/lib/nkp-bootstrap/<step>.done. A network drop or a VM restart
+# re-runs the service and it continues from the first unfinished step.
+# The air-gapped bundle downloads afterwards in nkp-airgap-download.service and
+# resumes from the last byte. Check both with: nkp-bootstrap-status
 
 # --- EDIT: guest name (match the Prism VM name) ---
 preserve_hostname: false
@@ -37,13 +43,24 @@ users:
 
 chpasswd:
   expire: false
-  list: |
-    ubuntu:ChangeMe-NKP-Bootstrap
+  users:
+    - name: ubuntu
+      password: ChangeMe-NKP-Bootstrap
+      type: text
 
 package_update: true
 package_upgrade: false
 
 write_files:
+  # EDIT: set NKP_SKIP_AIRGAP=true for a connected install (no 33 GiB download).
+  - path: /etc/default/nkp-bootstrap
+    permissions: "0644"
+    owner: root:root
+    content: |
+      NKP_VERSION=v2.19.1
+      NKP_SKIP_AIRGAP=false
+      NKP_LABS_REPO=https://github.com/fernandoquinino-ntx/nkp-labs.git
+
   - path: /usr/local/sbin/expand-root-disk.sh
     permissions: "0755"
     owner: root:root
@@ -51,6 +68,7 @@ write_files:
       #!/bin/bash
       # noble-server-cloudimg-amd64.img: GPT, root is an ext4 partition (growpart + resize2fs).
       # An LVM qcow2 (Ubuntu *-lvm.img or Rocky GenericCloud-LVM) grows the PV and the root LV.
+      # Safe to run again: an already grown disk is not an error.
       set -euxo pipefail
       export PATH="$PATH:/usr/sbin:/sbin:/usr/bin:/bin"
       echo "=== disk expansion ==="
@@ -62,12 +80,16 @@ write_files:
       FSTYPE="$(findmnt -n -o FSTYPE /)"
       echo "root=${ROOT_SRC} fstype=${FSTYPE}"
       grow_disk() {
-        local src="$1" pk part
+        local src="$1" pk part out rc=0
         pk="$(lsblk -no PKNAME "$src" 2>/dev/null | awk 'NF{print $1; exit}')"
         part="$(lsblk -no PARTN "$src" 2>/dev/null | awk 'NF{print $1; exit}')"
         [ -n "$pk" ] && [ -n "$part" ] || return 0
         sgdisk -e "/dev/${pk}" || true
-        growpart "/dev/${pk}" "$part"
+        out="$(growpart "/dev/${pk}" "$part" 2>&1)" || rc=$?
+        echo "$out"
+        if [ "$rc" -ne 0 ] && ! echo "$out" | grep -q NOCHANGE; then
+          return "$rc"
+        fi
         partprobe "/dev/${pk}" || true
       }
       case "$ROOT_SRC" in
@@ -76,7 +98,13 @@ write_files:
           [ -n "${PV:-}" ] || { echo "no LVM physical volume found" >&2; exit 1; }
           grow_disk "$PV"
           pvresize "$PV"
-          lvextend -l +100%FREE -r "$ROOT_SRC"
+          VG="$(lvs --noheadings -o vg_name "$ROOT_SRC" | awk 'NF{print $1; exit}')"
+          FREE="$(vgs --noheadings -o vg_free_count "$VG" | awk 'NF{print $1; exit}')"
+          if [ "${FREE:-0}" -gt 0 ]; then
+            lvextend -l +100%FREE -r "$ROOT_SRC"
+          else
+            echo "volume group ${VG} has no free extents. Root LV already uses the disk."
+          fi
           ;;
         *)
           grow_disk "$ROOT_SRC"
@@ -95,124 +123,324 @@ write_files:
     owner: root:root
     content: |
       #!/bin/bash
-      set -euo pipefail
+      # Run by nkp-bootstrap.service. Every step is skipped once its .done marker exists,
+      # so a re-run after a network failure or a VM restart continues where it stopped.
+      set -Eeuo pipefail
       export PATH="$PATH:/usr/sbin:/sbin:/usr/bin:/bin"
-      LOG=/var/log/nkp-bootstrap.log
+      export HOME="${HOME:-/root}"
+      [ -f /etc/default/nkp-bootstrap ] && . /etc/default/nkp-bootstrap
+      LOG="${NKP_LOG:-/var/log/nkp-bootstrap.log}"
+      STATE="${NKP_STATE_DIR:-/var/lib/nkp-bootstrap}"
+      BIN="${NKP_BIN_DIR:-/usr/local/bin}"
+      WS="${NKP_WORKSPACE:-/home/ubuntu/nkp-workspace}"
+      LABS="${NKP_LABS_DIR:-/opt/nkp-labs}"
+      NKP_USER="${NKP_USER:-ubuntu}"
+      mkdir -p "${STATE}"
       touch "${LOG}"
       chmod 0644 "${LOG}"
       exec > >(tee -a "${LOG}") 2>&1
-      echo "===== $(date -u +%Y-%m-%dT%H:%M:%SZ) nkp bootstrap start pid=$$ ====="
-      trap 'rc=$?; echo "===== FAILED line ${LINENO} exit ${rc} cmd=${BASH_COMMAND} at $(date -u +%Y-%m-%dT%H:%M:%SZ) ====="; exit ${rc}' ERR
+      if command -v flock >/dev/null 2>&1; then
+        exec 9>"${STATE}/.lock"
+        flock -n 9 || { echo "another nkp bootstrap run holds ${STATE}/.lock"; exit 0; }
+      fi
+      attempt=$(( $(cat "${STATE}/attempts" 2>/dev/null || echo 0) + 1 ))
+      echo "${attempt}" > "${STATE}/attempts"
+      echo "===== $(date -u +%Y-%m-%dT%H:%M:%SZ) nkp bootstrap start pid=$$ attempt=${attempt} ====="
+      trap 'rc=$?; echo "===== FAILED line ${LINENO} exit ${rc} cmd=${BASH_COMMAND} at $(date -u +%Y-%m-%dT%H:%M:%SZ). systemd retries in 60s. ====="; exit ${rc}' ERR
       set -x
       NKP_VERSION="${NKP_VERSION:-v2.19.1}"
       KUBECTL_VERSION="${KUBECTL_VERSION:-v1.36.2}"
       K9S_VERSION="${K9S_VERSION:-v0.51.0}"
       YQ_VERSION="${YQ_VERSION:-v4.47.1}"
       NKP_BASE_URL="${NKP_DOWNLOAD_BASE_URL:-https://downloads.d2iq.com/dkp}"
+      NKP_LABS_REPO="${NKP_LABS_REPO:-https://github.com/fernandoquinino-ntx/nkp-labs.git}"
+      RETRY_MAX="${RETRY_MAX:-8}"
+      RETRY_DELAY="${RETRY_DELAY:-10}"
+      NET_WAIT_SECONDS="${NET_WAIT_SECONDS:-1800}"
       case "$(uname -m)" in
         x86_64|amd64) arch="amd64" ;;
         aarch64|arm64) arch="arm64" ;;
-        *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+        *) echo "unsupported architecture: $(uname -m)" >&2; exit 3 ;;
       esac
-      . /etc/os-release
-      if command -v apt-get >/dev/null 2>&1; then
-        export DEBIAN_FRONTEND=noninteractive
-        apt-get update
-        apt-get install -y ca-certificates curl gnupg jq tar unzip wget git \
-          openssh-server cloud-guest-utils gdisk lvm2 e2fsprogs xfsprogs parted \
-          conntrack ebtables iptables socat sshpass make python3
-        /usr/local/sbin/expand-root-disk.sh
-        if ! command -v docker >/dev/null 2>&1; then
-          install -m 0755 -d /etc/apt/keyrings
-          curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-          chmod a+r /etc/apt/keyrings/docker.asc
-          echo "deb [arch=${arch} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu ${VERSION_CODENAME} stable" \
-            > /etc/apt/sources.list.d/docker.list
-          apt-get update
-          apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-        fi
-        systemctl enable --now ssh
-      elif command -v dnf >/dev/null 2>&1; then
-        dnf install -y ca-certificates curl gnupg2 jq tar unzip wget git \
-          openssh-server cloud-utils-growpart gdisk lvm2 e2fsprogs xfsprogs parted \
-          conntrack ebtables iptables socat sshpass make python3
-        /usr/local/sbin/expand-root-disk.sh
-        if ! command -v docker >/dev/null 2>&1; then
-          dnf-3 config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo \
-            || dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
-          dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-        fi
-        systemctl enable --now sshd
-      else
-        echo "no apt-get or dnf" >&2
-        exit 1
+      if [ -z "${NKP_SHA256:-}" ] && [ "${NKP_VERSION}" = "v2.19.1" ] && [ "${arch}" = "amd64" ]; then
+        NKP_SHA256=3d311ecb1848eadfd9e749f1ed4b451f0f16b63679fd537d62763051b396f770
       fi
-      systemctl enable --now docker
-      usermod -aG docker ubuntu || true
 
-      if ! command -v kubectl >/dev/null 2>&1 || ! kubectl version --client 2>/dev/null | grep -q "${KUBECTL_VERSION#v}"; then
-        curl -fsSL -o /tmp/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${arch}/kubectl"
-        install -m 0755 /tmp/kubectl /usr/local/bin/kubectl
+      retry() {
+        local n=0 delay="${RETRY_DELAY}"
+        until "$@"; do
+          n=$((n + 1))
+          if [ "${n}" -ge "${RETRY_MAX}" ]; then
+            echo "retry: giving up after ${n} tries: $*"
+            return 1
+          fi
+          echo "retry ${n}/${RETRY_MAX} in ${delay}s: $*"
+          sleep "${delay}"
+          delay=$((delay * 2)); [ "${delay}" -le 300 ] || delay=300
+        done
+      }
+      fetch() {
+        rm -f "$2.part"
+        retry curl -fsSL --connect-timeout 20 --max-time 1800 -o "$2.part" "$1"
+        mv -f "$2.part" "$2"
+      }
+      stage() {
+        local name="$1"; shift
+        if [ -f "${STATE}/${name}.done" ]; then
+          echo "----- skip ${name} (done)"
+          return 0
+        fi
+        echo "----- $(date -u +%Y-%m-%dT%H:%M:%SZ) stage ${name}"
+        "$@"
+        date -u +%Y-%m-%dT%H:%M:%SZ > "${STATE}/${name}.done"
+        echo "----- stage ${name} done"
+      }
+
+      wait_cloud_init() {
+        if command -v cloud-init >/dev/null 2>&1; then
+          timeout 900 cloud-init status --wait >/dev/null 2>&1 || true
+        fi
+      }
+      net_up() {
+        local url
+        for url in https://downloads.d2iq.com https://github.com https://dl.k8s.io; do
+          curl -sS -o /dev/null --connect-timeout 10 --max-time 20 "${url}" && return 0
+        done
+        return 1
+      }
+      wait_network() {
+        local waited=0
+        until net_up; do
+          if [ "${waited}" -ge "${NET_WAIT_SECONDS}" ]; then
+            echo "no internet after ${waited}s (DNS, proxy, or gateway). Exiting so systemd retries."
+            return 1
+          fi
+          echo "waiting for internet (${waited}s)"
+          sleep 15
+          waited=$((waited + 15))
+        done
+      }
+      apt_get() {
+        retry apt-get -o Acquire::Retries=5 -o DPkg::Lock::Timeout=600 "$@"
+      }
+      install_packages() {
+        if command -v apt-get >/dev/null 2>&1; then
+          export DEBIAN_FRONTEND=noninteractive
+          dpkg --configure -a || true
+          apt_get update
+          apt_get install -y -f
+          apt_get install -y ca-certificates curl gnupg jq tar unzip wget git \
+            openssh-server cloud-guest-utils gdisk lvm2 e2fsprogs xfsprogs parted \
+            conntrack ebtables iptables socat sshpass make python3 util-linux
+        elif command -v dnf >/dev/null 2>&1; then
+          retry dnf install -y --setopt=retries=10 ca-certificates curl gnupg2 jq tar unzip wget git \
+            openssh-server cloud-utils-growpart gdisk lvm2 e2fsprogs xfsprogs parted \
+            conntrack ebtables iptables socat sshpass make python3 util-linux
+        else
+          echo "no apt-get or dnf" >&2
+          return 3
+        fi
+      }
+      install_docker() {
+        if ! command -v docker >/dev/null 2>&1; then
+          if command -v apt-get >/dev/null 2>&1; then
+            . /etc/os-release
+            install -m 0755 -d /etc/apt/keyrings
+            fetch https://download.docker.com/linux/ubuntu/gpg /etc/apt/keyrings/docker.asc
+            chmod a+r /etc/apt/keyrings/docker.asc
+            echo "deb [arch=${arch} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu ${VERSION_CODENAME} stable" \
+              > /etc/apt/sources.list.d/docker.list
+            apt_get update
+            apt_get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+          else
+            fetch https://download.docker.com/linux/centos/docker-ce.repo /etc/yum.repos.d/docker-ce.repo
+            retry dnf install -y --setopt=retries=10 docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+          fi
+        fi
+        if command -v apt-get >/dev/null 2>&1; then
+          systemctl enable --now ssh
+        else
+          systemctl enable --now sshd
+        fi
+        systemctl enable --now docker
+        usermod -aG docker "${NKP_USER}" || true
+      }
+      install_kubectl() {
+        fetch "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${arch}/kubectl" /tmp/kubectl
+        install -m 0755 /tmp/kubectl "${BIN}/kubectl"
         rm -f /tmp/kubectl
-      fi
-      if ! command -v helm >/dev/null 2>&1; then
-        curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-      fi
-      if ! command -v flux >/dev/null 2>&1; then
-        curl -fsSL https://fluxcd.io/install.sh | bash
-      fi
-      if ! command -v k9s >/dev/null 2>&1; then
-        curl -fsSL -o /tmp/k9s.tar.gz \
-          "https://github.com/derailed/k9s/releases/download/${K9S_VERSION}/k9s_Linux_${arch}.tar.gz"
+        "${BIN}/kubectl" version --client
+      }
+      install_helm() {
+        fetch https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 /tmp/get-helm-3
+        retry env HELM_INSTALL_DIR="${BIN}" bash /tmp/get-helm-3
+        rm -f /tmp/get-helm-3
+        "${BIN}/helm" version
+      }
+      install_flux() {
+        fetch https://fluxcd.io/install.sh /tmp/install-flux.sh
+        retry bash /tmp/install-flux.sh "${BIN}"
+        rm -f /tmp/install-flux.sh
+        "${BIN}/flux" version --client || "${BIN}/flux" --version
+      }
+      install_k9s() {
+        fetch "https://github.com/derailed/k9s/releases/download/${K9S_VERSION}/k9s_Linux_${arch}.tar.gz" /tmp/k9s.tar.gz
         tar -xzf /tmp/k9s.tar.gz -C /tmp k9s
-        install -m 0755 /tmp/k9s /usr/local/bin/k9s
+        install -m 0755 /tmp/k9s "${BIN}/k9s"
         rm -f /tmp/k9s /tmp/k9s.tar.gz
-      fi
-      if ! command -v yq >/dev/null 2>&1; then
-        curl -fsSL -o /usr/local/bin/yq \
-          "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${arch}"
-        chmod 0755 /usr/local/bin/yq
-      fi
-      if ! command -v nkp >/dev/null 2>&1; then
-        nkp_url="${NKP_DOWNLOAD_URL:-${NKP_BASE_URL}/${NKP_VERSION}/nkp_${NKP_VERSION}_linux_${arch}.tar.gz}"
-        echo "downloading nkp from ${nkp_url}"
-        curl -fL "${nkp_url}" -o /tmp/nkp.tar.gz
+        "${BIN}/k9s" version
+      }
+      install_yq() {
+        fetch "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${arch}" /tmp/yq
+        install -m 0755 /tmp/yq "${BIN}/yq"
+        rm -f /tmp/yq
+        "${BIN}/yq" --version
+      }
+      install_nkp() {
+        local url tmp bin
+        url="${NKP_DOWNLOAD_URL:-${NKP_BASE_URL}/${NKP_VERSION}/nkp_${NKP_VERSION}_linux_${arch}.tar.gz}"
+        echo "downloading nkp from ${url}"
+        fetch "${url}" /tmp/nkp.tar.gz
+        if [ -n "${NKP_SHA256:-}" ]; then
+          if [ "$(sha256sum /tmp/nkp.tar.gz | awk '{print $1}')" != "${NKP_SHA256}" ]; then
+            rm -f /tmp/nkp.tar.gz
+            echo "nkp archive checksum mismatch. Removed it so the next run downloads it again." >&2
+            return 1
+          fi
+        fi
         tmp="$(mktemp -d)"
         tar -xzf /tmp/nkp.tar.gz -C "${tmp}"
         bin="$(find "${tmp}" -type f -name nkp | head -n1)"
-        [ -n "${bin}" ] || { echo "nkp binary not found in archive" >&2; exit 1; }
-        install -m 0755 "${bin}" /usr/local/bin/nkp
+        [ -n "${bin}" ] || { echo "nkp binary not found in archive" >&2; return 1; }
+        install -m 0755 "${bin}" "${BIN}/nkp"
         rm -rf "${tmp}" /tmp/nkp.tar.gz
-      fi
-      NKP_LABS_REPO="${NKP_LABS_REPO:-https://github.com/fernandoquinino-ntx/nkp-labs.git}"
-      rm -rf /opt/nkp-labs
-      git clone --depth 1 "${NKP_LABS_REPO}" /opt/nkp-labs
-      rm -rf /home/ubuntu/nkp-workspace
-      mkdir -p /home/ubuntu/nkp-workspace
-      cp -a /opt/nkp-labs/12-bootstrap-machine/. /home/ubuntu/nkp-workspace/
-      chown -R ubuntu:ubuntu /home/ubuntu/nkp-workspace
-      chmod 0755 /home/ubuntu/nkp-workspace/scripts/*.sh
+        "${BIN}/nkp" version || true
+      }
+      clone_labs() {
+        rm -rf "${LABS}.new"
+        git clone --depth 1 "${NKP_LABS_REPO}" "${LABS}.new"
+      }
+      sync_workspace() {
+        retry clone_labs
+        rm -rf "${LABS}"
+        mv "${LABS}.new" "${LABS}"
+        # Copy over the lab without deleting anything. env, values.local.yaml,
+        # create-cluster.env, kubeconfigs, registry/ and airgap/ are not in git and stay.
+        mkdir -p "${WS}"
+        cp -a "${LABS}/12-bootstrap-machine/." "${WS}/"
+        chown -R "${NKP_USER}:${NKP_USER}" "${WS}"
+        chmod 0755 "${WS}"/scripts/*.sh
+      }
+      pull_registry_image() {
+        # setup-local-registry.sh needs registry:2 after the host loses internet.
+        retry docker pull registry:2
+      }
+
+      wait_cloud_init
+      wait_network
+      stage packages install_packages
+      # Not a stage: it is idempotent and picks up a disk grown in Prism after the first boot.
+      /usr/local/sbin/expand-root-disk.sh || echo "WARN disk expansion failed. Check the lines above. The next run tries again."
+      stage docker install_docker
+      stage kubectl install_kubectl
+      stage helm install_helm
+      stage flux install_flux
+      stage k9s install_k9s
+      stage yq install_yq
+      stage nkp install_nkp
+      stage workspace sync_workspace
+      stage registry-image pull_registry_image
+
       echo "=== bootstrap toolchain ==="
       docker --version
-      kubectl version --client
-      helm version
-      flux version --client || flux --version || true
-      k9s version
-      yq --version
-      nkp version || true
-      echo "workspace: /home/ubuntu/nkp-workspace"
-      if [ "${SKIP_AIRGAP:-false}" != "true" ]; then
-        echo "===== $(date -u +%Y-%m-%dT%H:%M:%SZ) air-gapped bundle ====="
-        AIRGAP_DIR=/home/ubuntu/nkp-workspace/airgap /home/ubuntu/nkp-workspace/scripts/fetch-airgap-bundle.sh
-        chown -R ubuntu:ubuntu /home/ubuntu/nkp-workspace/airgap
+      "${BIN}/kubectl" version --client
+      "${BIN}/helm" version
+      "${BIN}/k9s" version || true
+      "${BIN}/yq" --version
+      "${BIN}/nkp" version || true
+      echo "workspace: ${WS}"
+      date -u +%Y-%m-%dT%H:%M:%SZ > "${STATE}/complete"
+
+      if [ "${NKP_SKIP_AIRGAP:-false}" != "true" ]; then
+        echo "===== starting nkp-airgap-download.service (resumes after restarts) ====="
+        systemctl enable nkp-airgap-download.service
+        systemctl start --no-block nkp-airgap-download.service
       else
-        echo "SKIP_AIRGAP=true — bundle not downloaded"
+        echo "NKP_SKIP_AIRGAP=true — bundle not downloaded"
       fi
       set +x
       echo "===== $(date -u +%Y-%m-%dT%H:%M:%SZ) nkp bootstrap done ====="
       echo "log: ${LOG}"
 
-runcmd:
-  - [bash, /usr/local/sbin/install-nkp-bootstrap-tools.sh]
+  - path: /etc/systemd/system/nkp-bootstrap.service
+    permissions: "0644"
+    owner: root:root
+    content: |
+      [Unit]
+      Description=NKP bootstrap toolchain (resumes after failures and restarts)
+      Wants=network-online.target
+      After=network-online.target
+      ConditionPathExists=!/var/lib/nkp-bootstrap/complete
+      StartLimitIntervalSec=0
 
-final_message: "NKP bootstrap ready. SSH user ubuntu. Log /var/log/nkp-bootstrap.log and /var/log/cloud-init-output.log."
+      [Service]
+      Type=simple
+      Environment=HOME=/root
+      ExecStart=/usr/local/sbin/install-nkp-bootstrap-tools.sh
+      Restart=on-failure
+      RestartSec=60
+      RestartPreventExitStatus=3
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/systemd/system/nkp-airgap-download.service
+    permissions: "0644"
+    owner: root:root
+    content: |
+      [Unit]
+      Description=NKP air-gapped bundle download (resumes after failures and restarts)
+      Wants=network-online.target
+      After=network-online.target
+      ConditionPathExists=/home/ubuntu/nkp-workspace/scripts/fetch-airgap-bundle.sh
+      StartLimitIntervalSec=0
+
+      [Service]
+      Type=simple
+      Environment=HOME=/root
+      Environment=AIRGAP_DIR=/home/ubuntu/nkp-workspace/airgap
+      ExecStart=/home/ubuntu/nkp-workspace/scripts/fetch-airgap-bundle.sh
+      ExecStopPost=-/bin/chown -R ubuntu:ubuntu /home/ubuntu/nkp-workspace/airgap
+      Restart=on-failure
+      RestartSec=300
+      RestartPreventExitStatus=3
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /usr/local/bin/nkp-bootstrap-status
+    permissions: "0755"
+    owner: root:root
+    content: |
+      #!/bin/bash
+      # Where the bootstrap and the bundle download stand.
+      echo "== steps done (/var/lib/nkp-bootstrap)"
+      for f in /var/lib/nkp-bootstrap/*.done; do
+        [ -e "$f" ] && printf '  %-16s %s\n' "$(basename "$f" .done)" "$(cat "$f")"
+      done
+      [ -f /var/lib/nkp-bootstrap/complete ] && echo "  toolchain COMPLETE $(cat /var/lib/nkp-bootstrap/complete)"
+      echo "  attempts $(cat /var/lib/nkp-bootstrap/attempts 2>/dev/null || echo 0)"
+      for u in nkp-bootstrap nkp-airgap-download; do
+        echo "== ${u}.service: $(systemctl is-active "${u}.service" 2>/dev/null) / $(systemctl is-enabled "${u}.service" 2>/dev/null)"
+      done
+      echo "== air-gapped bundle"
+      ls -l /home/ubuntu/nkp-workspace/airgap/ 2>/dev/null || echo "  not started"
+      echo "== last log lines (/var/log/nkp-bootstrap.log)"
+      tail -n 15 /var/log/nkp-bootstrap.log 2>/dev/null
+
+runcmd:
+  - [systemctl, daemon-reload]
+  - [systemctl, enable, nkp-bootstrap.service]
+  - [systemctl, start, --no-block, nkp-bootstrap.service]
+
+final_message: "cloud-init done. The NKP install continues in nkp-bootstrap.service. Run nkp-bootstrap-status. Log /var/log/nkp-bootstrap.log."

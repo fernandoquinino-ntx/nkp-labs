@@ -57,6 +57,17 @@ if [ -f "${WORK_KC}" ] && kubectl --kubeconfig "${WORK_KC}" get nodes >/dev/null
 else
   if [ -f "${BOOT_KC}" ]; then
     echo "bootstrap kubeconfig already exists at ${BOOT_KC}"
+    # After a VM restart Docker brings the kind node back. Give its API time to answer.
+    for i in $(seq 1 30); do
+      kubectl --kubeconfig "${BOOT_KC}" get nodes >/dev/null 2>&1 && break
+      [ "${i}" -eq 30 ] && {
+        echo "bootstrap cluster in ${BOOT_KC} does not answer. Check: docker ps -a | grep bootstrap" >&2
+        echo "If it is gone and no NKP VMs exist yet, remove ${BOOT_KC} and re-run." >&2
+        exit 1
+      }
+      echo "  waiting for the bootstrap API (${i}/30)"
+      sleep 10
+    done
   else
     echo "=== nkp create bootstrap ==="
     nkp create bootstrap --kubeconfig "${BOOT_KC}" --timeout "${BOOTSTRAP_TIMEOUT}"
@@ -81,8 +92,9 @@ else
   [ "${ready}" -ge "${EXPECTED}" ] || { echo "timed out waiting for machines" >&2; exit 1; }
 
   echo "=== nkp get kubeconfig ==="
-  nkp get kubeconfig -c "${CLUSTER}" -n "${NAMESPACE}" --kubeconfig "${BOOT_KC}" > "${WORK_KC}"
-  chmod 600 "${WORK_KC}"
+  nkp get kubeconfig -c "${CLUSTER}" -n "${NAMESPACE}" --kubeconfig "${BOOT_KC}" > "${WORK_KC}.tmp"
+  chmod 600 "${WORK_KC}.tmp"
+  mv -f "${WORK_KC}.tmp" "${WORK_KC}"
 fi
 
 if [ "${SKIP_PIVOT}" = "true" ]; then

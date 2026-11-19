@@ -31,7 +31,31 @@ https://raw.githubusercontent.com/fernandoquinino-ntx/nkp-labs/main/12-bootstrap
 | yq v4.47.1 | https://github.com/mikefarah/yq/releases/download/v4.47.1/yq_linux_amd64 |
 
 It then clones https://github.com/fernandoquinino-ntx/nkp-labs.git and copies this lab to
-`/home/ubuntu/nkp-workspace`. Watch `/var/log/cloud-init-output.log`.
+`/home/ubuntu/nkp-workspace`.
+
+## Failures and restarts
+
+Cloud-init only writes the files and starts `nkp-bootstrap.service`. The service does the install.
+
+| Problem | What happens |
+|---|---|
+| No internet yet | waits up to 30 min (checks d2iq, GitHub, dl.k8s.io), then exits and systemd retries in 60 s |
+| One download fails | `curl` retried 8 times, 10 s backoff doubling up to 5 min. apt uses `Acquire::Retries=5` and waits for the dpkg lock |
+| `nkp` archive corrupt | sha256 check fails, archive deleted, step retried |
+| VM stopped mid-run | the service is enabled. At boot it runs `dpkg --configure -a` and continues at the first step without a `.done` marker |
+| Disk grown later in Prism | `expand-root-disk.sh` runs on every attempt. An already grown disk is not an error |
+| Re-run | the workspace copy never deletes `env`, `values.local.yaml`, `create-cluster.env`, kubeconfigs, `registry/` or `airgap/` |
+
+```bash
+nkp-bootstrap-status                       # steps done, services, last log lines
+journalctl -u nkp-bootstrap -f
+less /var/log/nkp-bootstrap.log            # full trace with timestamps and FAILED lines
+sudo rm /var/lib/nkp-bootstrap/helm.done   # force one step again
+sudo rm /var/lib/nkp-bootstrap/complete && sudo systemctl start nkp-bootstrap   # force a new run
+```
+
+Steps in order: `packages`, `docker`, `kubectl`, `helm`, `flux`, `k9s`, `yq`, `nkp`, `workspace`,
+`registry-image`. Then `complete`, and the air-gap download starts ([06](06-airgap-registry.md)).
 
 Log out and back in once so the `docker` group applies. `scripts/install-nkp.sh` checks `docker info`
 and stops if this user still cannot talk to the daemon.

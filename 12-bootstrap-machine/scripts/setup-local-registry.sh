@@ -11,6 +11,9 @@ STATE="${REGISTRY_STATE_DIR:-${LAB}/registry}"
 HOST="${REGISTRY_HOST:-registry.nkp.local}"
 PORT="${REGISTRY_PORT:-5000}"
 IP="${REGISTRY_IP:-}"
+if [ -z "${IP}" ] && command -v hostname >/dev/null 2>&1; then
+  IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+fi
 REG_USER="${REGISTRY_USER:-nkp}"
 REG_PASSWORD="${REGISTRY_PASSWORD:-}"
 SKIP_DOCKER="${SKIP_DOCKER:-false}"
@@ -18,6 +21,10 @@ SKIP_DOCKER="${SKIP_DOCKER:-false}"
 mkdir -p "${STATE}/certs" "${STATE}/auth" "${STATE}/data"
 chmod 700 "${STATE}" "${STATE}/certs" "${STATE}/auth"
 
+# Keep the password from an earlier run. A new one would break the secret already in the cluster.
+if [ -z "${REG_PASSWORD}" ] && [ -f "${STATE}/credentials.env" ]; then
+  REG_PASSWORD="$(awk -F= '$1 == "REGISTRY_PASSWORD" {print substr($0, index($0, "=") + 1)}' "${STATE}/credentials.env")"
+fi
 if [ -z "${REG_PASSWORD}" ]; then
   REG_PASSWORD="$(openssl rand -base64 24 | tr -d '/+=' | head -c 24)"
 fi
@@ -63,6 +70,9 @@ chmod 600 "${STATE}/auth/htpasswd"
 if [ -d /etc/docker ] && [ "$(id -u)" -eq 0 ]; then
   install -d -m 0755 "/etc/docker/certs.d/${HOST}:${PORT}"
   install -m 0644 "${STATE}/certs/ca.crt" "/etc/docker/certs.d/${HOST}:${PORT}/ca.crt"
+fi
+if [ -n "${IP}" ] && [ "$(id -u)" -eq 0 ] && ! getent hosts "${HOST}" >/dev/null 2>&1; then
+  echo "${IP} ${HOST}" >> /etc/hosts
 fi
 install -d -m 0755 "${STATE}/docker-certs.d/${HOST}:${PORT}"
 install -m 0644 "${STATE}/certs/ca.crt" "${STATE}/docker-certs.d/${HOST}:${PORT}/ca.crt"

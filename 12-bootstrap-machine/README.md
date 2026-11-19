@@ -49,13 +49,13 @@ Use one path for a given cluster name.
 
 | File | What |
 |---|---|
-| `cloud-init.yaml` | Prism guest customization. Grows the disk, installs the toolchain, clones this lab |
+| `cloud-init.yaml` | Prism guest customization. Installs `nkp-bootstrap.service`, which grows the disk, installs the toolchain, clones this lab, and resumes after a failure or a restart. `nkp-bootstrap-status` shows progress |
 | `env.example` | installer knobs (`CLUSTER_NAME`, `EXPECTED`, `INSTALL_KOMMANDER`). Copy to `env` |
 | `values.example.yaml` | NKP cluster values. Copy to `values.local.yaml` (gitignored) |
 | `scripts/install-nkp.sh` | Helm path: `nkp create bootstrap`, chart, kubeconfig, pivot, optional Kommander |
 | `create-cluster.env.example` | CLI path values. Copy to `create-cluster.env` (gitignored) |
 | `scripts/create-cluster.sh` | CLI path: `nkp create cluster nutanix --self-managed` |
-| `scripts/fetch-airgap-bundle.sh` | download the 2.19.1 air-gapped bundle (~33 GiB). Cloud-init runs this. Log: `/var/log/nkp-bootstrap.log` |
+| `scripts/fetch-airgap-bundle.sh` | download the 2.19.1 air-gapped bundle (~33 GiB). Resumes, checks the size, writes `.complete`. Run by `nkp-airgap-download.service`. Log: `/var/log/nkp-bootstrap.log` |
 | `scripts/setup-local-registry.sh` | self-signed CA, registry certificate, `registry:2` on this host |
 | `scripts/trust-registry.sh` | Opaque Secret `username` / `password` / `ca.crt` for CAREN |
 | `helm-charts/nkp-cluster/` | `NKPCluster` plus Prism secrets |

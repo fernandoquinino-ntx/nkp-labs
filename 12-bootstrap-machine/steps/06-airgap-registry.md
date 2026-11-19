@@ -1,10 +1,32 @@
 # 06 — Air-gapped bundle and a local registry
 
-Cloud-init installs the CLIs, then downloads this bundle before it finishes. The bundle does not fit
-on a 40 GiB disk. Give the VM about **200 GiB**. If the download fails, read
-`/var/log/nkp-bootstrap.log` and `/var/log/cloud-init-output.log`. Re-run
-`./scripts/fetch-airgap-bundle.sh` to resume. Set `SKIP_AIRGAP=true` in the cloud-init environment
-only when you will copy the tarball onto the VM yourself.
+When the toolchain is complete, `nkp-bootstrap.service` starts `nkp-airgap-download.service`. The
+bundle does not fit on a 40 GiB disk. Give the VM about **200 GiB**.
+
+The download resumes from the last byte. Within one run curl tries up to 30 times, backing off from
+30 s to 10 min. A transfer slower than 10 KiB/s for 5 min is dropped and retried. If a run fails,
+systemd starts it again after 5 min, and again after each VM restart. A finished file must match the
+server's Content-Length, then the script writes
+`airgap/nkp-air-gapped-bundle_v2.19.1_linux_amd64.tar.gz.complete` and later runs exit at once.
+Set `AIRGAP_SHA256` to also check a checksum.
+
+| Exit | Meaning | systemd |
+|---|---|---|
+| 0 | complete | stops |
+| 1 | network, server, or short file | retries in 5 min |
+| 3 | disk too small or checksum mismatch | stops. Fix it, then `sudo systemctl start nkp-airgap-download` |
+
+```bash
+nkp-bootstrap-status
+journalctl -u nkp-airgap-download -f
+grep '\[airgap\]' /var/log/nkp-bootstrap.log
+```
+
+Set `NKP_SKIP_AIRGAP=true` in `/etc/default/nkp-bootstrap` (top of `cloud-init.yaml`) only when you
+will copy the tarball onto the VM yourself.
+
+`registry:2` is pulled during the bootstrap, so `setup-local-registry.sh` works after the host loses
+internet.
 
 ## Bundle
 
@@ -45,8 +67,13 @@ The script writes:
 | `registry/credentials.env` | user, password, URL (mode 600) |
 | `registry/docker-certs.d/<host>:<port>/ca.crt` | file Docker on this host should trust |
 
-Add `REGISTRY_IP registry.nkp.local` to `/etc/hosts` on the bastion and on a resolver the cluster nodes use.
-As root, the script also copies the CA to `/etc/docker/certs.d/<host>:<port>/ca.crt`.
+`REGISTRY_IP` defaults to the first address of `hostname -I`. It goes into the certificate SAN.
+As root, the script copies the CA to `/etc/docker/certs.d/<host>:<port>/ca.crt` and adds
+`REGISTRY_IP registry.nkp.local` to `/etc/hosts` when the name does not resolve. Add the same record
+to a resolver the cluster nodes use.
+
+Run it again at any time. It keeps the CA, the certificate, and the password in
+`registry/credentials.env`, so the Secret already in the cluster stays valid.
 
 ## Trust on the NKP cluster
 
