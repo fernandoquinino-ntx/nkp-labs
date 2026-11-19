@@ -3,6 +3,7 @@
 # do not edit). Nothing here uses the internet or git. After boot the VM waits for the
 # offline bundle, checks it, and installs only from it:
 #   client$ ./scripts/get-offline-bundle.sh
+#   Windows: .\scripts\get-offline-bundle.ps1
 #   client$ ./scripts/push-offline-bundle.sh dist/nkp-bootstrap-offline-*.tar.gz ubuntu@<vm-ip> --follow
 # Ubuntu 24.04 amd64 only. Progress: nkp-bootstrap-status. Log: /var/log/nkp-bootstrap.log
 # Details: steps/07-offline-bootstrap.md

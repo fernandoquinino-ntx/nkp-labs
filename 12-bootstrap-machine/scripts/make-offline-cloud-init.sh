@@ -20,6 +20,7 @@ grep -q '^      NKP_MODE=online$' "${SRC}" || { echo "NKP_MODE=online not found 
   echo '# do not edit). Nothing here uses the internet or git. After boot the VM waits for the'
   echo '# offline bundle, checks it, and installs only from it:'
   echo '#   client$ ./scripts/get-offline-bundle.sh'
+  echo '#   Windows: .\scripts\get-offline-bundle.ps1'
   echo '#   client$ ./scripts/push-offline-bundle.sh dist/nkp-bootstrap-offline-*.tar.gz ubuntu@<vm-ip> --follow'
   echo '# Ubuntu 24.04 amd64 only. Progress: nkp-bootstrap-status. Log: /var/log/nkp-bootstrap.log'
   echo '# Details: steps/07-offline-bootstrap.md'

@@ -32,6 +32,15 @@ git clone https://github.com/fernandoquinino-ntx/nkp-labs.git && cd nkp-labs/12-
 ./scripts/get-offline-bundle.sh
 ```
 
+Windows PowerShell (same download and the same sha256 check):
+
+```powershell
+git clone https://github.com/fernandoquinino-ntx/nkp-labs.git; cd nkp-labs\12-bootstrap-machine
+winget install GitHub.cli
+gh auth login
+powershell -ExecutionPolicy Bypass -File .\scripts\get-offline-bundle.ps1
+```
+
 The script downloads the latest successful build of the
 [`offline-bundle` workflow](https://github.com/fernandoquinino-ntx/nkp-labs/actions/workflows/offline-bundle.yml)
 with `gh` (run `gh auth login` first) and checks its sha256. Without `gh` or a CI build it runs
