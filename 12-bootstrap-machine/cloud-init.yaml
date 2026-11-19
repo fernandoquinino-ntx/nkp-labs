@@ -184,7 +184,7 @@ write_files:
       mkdir -p /home/ubuntu/nkp-workspace
       cp -a /opt/nkp-labs/12-bootstrap-machine/. /home/ubuntu/nkp-workspace/
       chown -R ubuntu:ubuntu /home/ubuntu/nkp-workspace
-      chmod 0755 /home/ubuntu/nkp-workspace/scripts/install-nkp.sh
+      chmod 0755 /home/ubuntu/nkp-workspace/scripts/install-nkp.sh /home/ubuntu/nkp-workspace/scripts/create-cluster.sh
       echo "=== bootstrap toolchain ==="
       docker --version
       kubectl version --client

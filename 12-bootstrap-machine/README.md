@@ -1,26 +1,38 @@
 # Lab 12 — Ubuntu bootstrap machine and NKP 2.19 install
 
 **Learn:** how to paste a Prism Central cloud-init that builds an Ubuntu jump host, and how to install a
-**self-managed NKP 2.19** cluster from this lab's Helm charts.
+**self-managed NKP 2.19** cluster by either path from `nkp-deployer`.
 
 ```mermaid
 flowchart LR
-  A["Prism image<br/>Ubuntu 24.04 amd64"] --> B["cloud-init<br/>tools + clone this lab"] --> C["values.local.yaml"] --> D["scripts/install-nkp.sh"] --> E["bootstrap, cluster, pivot"]
+  A["cloud-init copies this lab"] --> B["Helm path<br/>scripts/install-nkp.sh"]
+  A --> C["CLI path<br/>scripts/create-cluster.sh"]
 ```
 
 Cloud-init clones this repository and copies **this folder** to `/home/ubuntu/nkp-workspace` on the VM.
-From there you run `./scripts/install-nkp.sh`.
+Both scripts are in that copy.
 
 ## Quick run
 
+Helm path (kind bootstrap, chart, pivot), from `nkp-infra-tf`:
+
 ```bash
-# on the jump host, after cloud-init finishes
 cd /home/ubuntu/nkp-workspace
 cp env.example env
 cp values.example.yaml values.local.yaml
-# edit Prism, the node SSH key, VIPs, and the NKP image name
 ./scripts/install-nkp.sh
 ```
+
+CLI path (`nkp create cluster nutanix --self-managed`), from
+`nkp-deployer/install/management-cluster/traditional/nkp-installer.sh`:
+
+```bash
+cd /home/ubuntu/nkp-workspace
+cp create-cluster.env.example create-cluster.env
+./scripts/create-cluster.sh
+```
+
+Use one path for a given cluster name.
 
 ## Steps
 
@@ -28,8 +40,9 @@ cp values.example.yaml values.local.yaml
 |---|---|---|
 | 01 | [Image and VM](steps/01-image-and-vm.md) | download the Ubuntu qcow2, size the VM, set the Prism name |
 | 02 | [Cloud-init](steps/02-cloud-init.md) | paste `cloud-init.yaml`, set the password and SSH key |
-| 03 | [Install the cluster](steps/03-install-cluster.md) | fill `values.local.yaml` and run `scripts/install-nkp.sh` |
+| 03 | [Helm path](steps/03-install-cluster.md) | fill `values.local.yaml` and run `scripts/install-nkp.sh` |
 | 04 | [Kommander](steps/04-kommander.md) | turn on `INSTALL_KOMMANDER` and the Docker Hub secret |
+| 05 | [`nkp create cluster`](steps/05-create-cluster.md) | fill `create-cluster.env` and run `scripts/create-cluster.sh` |
 
 ## Files
 
@@ -38,7 +51,9 @@ cp values.example.yaml values.local.yaml
 | `cloud-init.yaml` | Prism guest customization. Grows the disk, installs the toolchain, clones this lab |
 | `env.example` | installer knobs (`CLUSTER_NAME`, `EXPECTED`, `INSTALL_KOMMANDER`). Copy to `env` |
 | `values.example.yaml` | NKP cluster values. Copy to `values.local.yaml` (gitignored) |
-| `scripts/install-nkp.sh` | `nkp create bootstrap`, Helm, kubeconfig, pivot, optional Kommander |
+| `scripts/install-nkp.sh` | Helm path: `nkp create bootstrap`, chart, kubeconfig, pivot, optional Kommander |
+| `create-cluster.env.example` | CLI path values. Copy to `create-cluster.env` (gitignored) |
+| `scripts/create-cluster.sh` | CLI path: `nkp create cluster nutanix --self-managed` |
 | `helm-charts/nkp-cluster/` | `NKPCluster` plus Prism secrets |
 | `helm-charts/nkp-kommander/` | Kommander installer ConfigMap and the Docker Hub secret |
 

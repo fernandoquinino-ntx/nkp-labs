@@ -2,6 +2,7 @@
 local.env
 .env
 12-bootstrap-machine/env
+12-bootstrap-machine/create-cluster.env
 12-bootstrap-machine/values.local.yaml
 12-bootstrap-machine/kommander.yaml
 rendered/

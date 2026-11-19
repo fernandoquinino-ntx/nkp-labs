@@ -1,4 +1,6 @@
-# 03 — Install the cluster
+# 03 — Helm path
+
+This is one of the two install paths. The other is [`nkp create cluster`](05-create-cluster.md).
 
 On the jump host:
 
