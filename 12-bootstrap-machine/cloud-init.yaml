@@ -7,6 +7,9 @@
 # inside the guest. Use the same string in both places.
 #
 # Before pasting, edit the lines marked EDIT.
+# Blocks between ">>> online-only" and "<<< online-only" are left out of
+# cloud-init-offline.yaml by scripts/make-offline-cloud-init.sh.
+# >>> online-only
 # Ubuntu 24.04 cloud image is the primary target. The same file also grows a
 # Rocky LVM root disk and installs packages with dnf when that is the image.
 #
@@ -20,6 +23,7 @@
 #
 # No internet on this VM? Set NKP_MODE=offline below and push the offline bundle from a
 # client: steps/07-offline-bootstrap.md.
+# <<< online-only
 
 # --- EDIT: guest name (match the Prism VM name) ---
 preserve_hostname: false
@@ -58,31 +62,40 @@ package_update: false
 package_upgrade: false
 
 write_files:
+  # >>> online-only
   # EDIT: NKP_MODE=online downloads everything from the internet.
   #       NKP_MODE=offline installs only from the bundle you push with
   #       scripts/push-offline-bundle.sh (no internet needed on this VM).
   # EDIT: NKP_SKIP_AIRGAP=true skips the 33 GiB download in online mode.
+  # <<< online-only
   - path: /etc/default/nkp-bootstrap
     permissions: "0644"
     owner: root:root
     content: |
       NKP_MODE=online
       NKP_VERSION=v2.19.1
+      NKP_OFFLINE_DIR=/opt/nkp-offline
+      NKP_OFFLINE_DROP=/home/ubuntu
+      # >>> online-only
       NKP_SKIP_AIRGAP=false
       NKP_LABS_REPO=https://github.com/fernandoquinino-ntx/nkp-labs.git
       NKP_LABS_REF=main
-      NKP_OFFLINE_DIR=/opt/nkp-offline
-      NKP_OFFLINE_DROP=/home/ubuntu
+      # <<< online-only
 
-  # Small on purpose. The real install is scripts/bootstrap-host.sh in nkp-labs: fetched
-  # fresh from git on every run (online), or taken from the pushed bundle (offline).
+  # Small on purpose. The real install is scripts/bootstrap-host.sh.
+  # Offline it comes from the pushed bundle.
+  # >>> online-only
+  # Online it is fetched fresh from nkp-labs on every run.
+  # <<< online-only
   - path: /usr/local/sbin/install-nkp-bootstrap-tools.sh
     permissions: "0755"
     owner: root:root
     content: |
       #!/bin/bash
+      # >>> online-only
       # Online: download the latest bootstrap scripts from nkp-labs, then run them. If GitHub
       # cannot be reached, run the copy from the last good download.
+      # <<< online-only
       # Offline: wait for nkp-bootstrap-offline-*.tar.gz in NKP_OFFLINE_DROP, check it,
       # unpack it to NKP_OFFLINE_DIR, then run the scripts inside it.
       # With nothing to run yet, exit 1 and systemd tries again in 60s.
@@ -127,6 +140,7 @@ write_files:
           mv -f "${LIB}/${f}.new" "${LIB}/${f}"
         done
         export NKP_OFFLINE_DIR="${OFF}"
+      # >>> online-only
       else
         RAW="${NKP_LABS_RAW:-https://raw.githubusercontent.com/fernandoquinino-ntx/nkp-labs}/${NKP_LABS_REF:-main}/12-bootstrap-machine/scripts"
         online=true
@@ -153,10 +167,11 @@ write_files:
             log "could not fetch ${f}. Using the cached copy if there is one."
           fi
         done
+      # <<< online-only
       fi
       ln -sf "${LIB}/update-workspace.sh" "${NKP_BIN_DIR:-/usr/local/bin}/nkp-update"
       if [ ! -f "${LIB}/bootstrap-host.sh" ]; then
-        log "no bootstrap-host.sh yet (no internet on the first run). systemd retries in 60s."
+        log "no bootstrap-host.sh yet. systemd retries in 60s."
         exit 1
       fi
       exec bash "${LIB}/bootstrap-host.sh"
@@ -183,6 +198,7 @@ write_files:
       [Install]
       WantedBy=multi-user.target
 
+  # >>> online-only
   - path: /etc/systemd/system/nkp-airgap-download.service
     permissions: "0644"
     owner: root:root
@@ -206,6 +222,7 @@ write_files:
 
       [Install]
       WantedBy=multi-user.target
+  # <<< online-only
 
   - path: /usr/local/bin/nkp-bootstrap-status
     permissions: "0755"
@@ -220,6 +237,7 @@ write_files:
       [ -f /var/lib/nkp-bootstrap/complete ] && echo "  toolchain COMPLETE $(cat /var/lib/nkp-bootstrap/complete)"
       echo "  attempts $(cat /var/lib/nkp-bootstrap/attempts 2>/dev/null || echo 0)"
       for u in nkp-bootstrap nkp-airgap-download; do
+        systemctl cat "${u}.service" >/dev/null 2>&1 || continue
         echo "== ${u}.service: $(systemctl is-active "${u}.service" 2>/dev/null) / $(systemctl is-enabled "${u}.service" 2>/dev/null)"
       done
       echo "== air-gapped bundle"
