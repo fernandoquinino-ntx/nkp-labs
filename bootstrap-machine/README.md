@@ -24,9 +24,9 @@ At the top of `cloud-init.yaml`:
 
 ## Prism steps (Ubuntu first)
 
-1. Download the Ubuntu 24.04 cloud image qcow2 and upload it as a Prism image:
+1. Download this Ubuntu 24.04 amd64 cloud image and upload it as a Prism image:
    `https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img`
-2. Use an **LVM** qcow2. Ubuntu: `noble-server-cloudimg-amd64-lvm.img`. Rocky: GenericCloud-LVM. Create a VM from that image. Suggested size: **4 vCPU, 8 GiB RAM, 40 GiB disk**. The script grows the physical volume and the root logical volume up to that Prism disk.
+2. Create the VM from that image. Suggested size: **4 vCPU, 8 GiB RAM, 40 GiB disk**. The image root is an ext4 partition. The script runs `growpart` and `resize2fs` so the filesystem fills the Prism disk. An LVM image still works: the same script grows the physical volume and the root logical volume.
 3. Guest Customization → **Cloud-init**. Paste the whole `cloud-init.yaml`, starting at `#cloud-config`. Do not base64-encode it.
 4. After boot, SSH as `ubuntu`. Log out and back in once so the `docker` group applies.
 5. First boot downloads Docker and the NKP 2.19 CLI (~180 MB). Watch `/var/log/cloud-init-output.log`.
