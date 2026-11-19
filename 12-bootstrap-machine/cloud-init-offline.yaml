@@ -14,7 +14,6 @@
 # inside the guest. Use the same string in both places.
 #
 # Before pasting, edit the lines marked EDIT.
-# Blocks between ">>> online-only" and "<<< online-only" are left out of
 
 # --- EDIT: guest name (match the Prism VM name) ---
 preserve_hostname: false
@@ -127,8 +126,6 @@ write_files:
     content: |
       [Unit]
       Description=NKP bootstrap toolchain (resumes after failures and restarts)
-      Wants=network-online.target
-      After=network-online.target
       ConditionPathExists=!/var/lib/nkp-bootstrap/complete
       StartLimitIntervalSec=0
 

@@ -7,8 +7,6 @@
 # inside the guest. Use the same string in both places.
 #
 # Before pasting, edit the lines marked EDIT.
-# Blocks between ">>> online-only" and "<<< online-only" are left out of
-# cloud-init-offline.yaml by scripts/make-offline-cloud-init.sh.
 # >>> online-only
 # Ubuntu 24.04 cloud image is the primary target. The same file also grows a
 # Rocky LVM root disk and installs packages with dnf when that is the image.
@@ -182,8 +180,11 @@ write_files:
     content: |
       [Unit]
       Description=NKP bootstrap toolchain (resumes after failures and restarts)
+      # >>> online-only
+      # Offline has no network, so it must not wait for one.
       Wants=network-online.target
       After=network-online.target
+      # <<< online-only
       ConditionPathExists=!/var/lib/nkp-bootstrap/complete
       StartLimitIntervalSec=0
 
