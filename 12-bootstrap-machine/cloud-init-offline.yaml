@@ -74,8 +74,6 @@ write_files:
       NKP_MODE=offline
       NKP_VERSION=v2.19.1
       NKP_SKIP_AIRGAP=false
-      NKP_LABS_REPO=https://github.com/fernandoquinino-ntx/nkp-labs.git
-      NKP_LABS_REF=main
       NKP_OFFLINE_DIR=/opt/nkp-offline
       NKP_OFFLINE_DROP=/home/ubuntu
 

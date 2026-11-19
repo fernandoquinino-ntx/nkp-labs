@@ -21,7 +21,10 @@ grep -q '^      NKP_MODE=online$' "${SRC}" || { echo "NKP_MODE=online not found 
   echo '#   client$ ./scripts/get-offline-bundle.sh'
   echo '#   client$ ./scripts/push-offline-bundle.sh dist/nkp-bootstrap-offline-*.tar.gz ubuntu@<vm-ip> --follow'
   echo '# Details: steps/07-offline-bootstrap.md'
-  tail -n +2 "${SRC}" | sed 's/^      NKP_MODE=online$/      NKP_MODE=offline/'
+  # The git settings only matter online. Offline, the scripts and the lab come from the bundle.
+  tail -n +2 "${SRC}" \
+    | sed -e 's/^      NKP_MODE=online$/      NKP_MODE=offline/' \
+          -e '/^      NKP_LABS_REPO=/d' -e '/^      NKP_LABS_REF=/d'
 } > "${TMP}"
 
 if [ "${1:-}" = "--check" ]; then
