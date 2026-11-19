@@ -33,6 +33,23 @@ https://raw.githubusercontent.com/fernandoquinino-ntx/nkp-labs/main/12-bootstrap
 It then clones https://github.com/fernandoquinino-ntx/nkp-labs.git and copies this lab to
 `/home/ubuntu/nkp-workspace`.
 
+## Latest scripts from git
+
+The pasted cloud-init is only a loader. Each run of `nkp-bootstrap.service` downloads the latest
+`scripts/bootstrap-host.sh`, `expand-root-disk.sh` and `update-workspace.sh` from `main` into
+`/usr/local/lib/nkp-bootstrap/`, then refreshes `/home/ubuntu/nkp-workspace` from git. If GitHub cannot
+be reached, it runs the last copy it downloaded. A fix pushed to the repo reaches the VM without a new
+paste:
+
+```bash
+nkp-update            # pull the latest lab into ~/nkp-workspace (scripts, charts, docs)
+nkp-update --rerun    # also run the bootstrap again. Finished steps are skipped
+```
+
+`nkp-update` never deletes `env`, `values.local.yaml`, `create-cluster.env`, kubeconfigs, `registry/`
+or `airgap/`. Files tracked in git are overwritten, so put your edits in the gitignored copies, not in
+`*.example`. Set `NKP_LABS_REF` in `/etc/default/nkp-bootstrap` to pin a branch or tag.
+
 ## Failures and restarts
 
 Cloud-init only writes the files and starts `nkp-bootstrap.service`. The service does the install.
@@ -44,6 +61,7 @@ Cloud-init only writes the files and starts `nkp-bootstrap.service`. The service
 | `nkp` archive corrupt | sha256 check fails, archive deleted, step retried |
 | VM stopped mid-run | the service is enabled. At boot it runs `dpkg --configure -a` and continues at the first step without a `.done` marker |
 | Disk grown later in Prism | `expand-root-disk.sh` runs on every attempt. An already grown disk is not an error |
+| GitHub down | loader runs the cached scripts. The workspace keeps its last copy. First boot without GitHub: systemd retries in 60 s |
 | Re-run | the workspace copy never deletes `env`, `values.local.yaml`, `create-cluster.env`, kubeconfigs, `registry/` or `airgap/` |
 
 ```bash
@@ -54,8 +72,8 @@ sudo rm /var/lib/nkp-bootstrap/helm.done   # force one step again
 sudo rm /var/lib/nkp-bootstrap/complete && sudo systemctl start nkp-bootstrap   # force a new run
 ```
 
-Steps in order: `packages`, `docker`, `kubectl`, `helm`, `flux`, `k9s`, `yq`, `nkp`, `workspace`,
-`registry-image`. Then `complete`, and the air-gap download starts ([06](06-airgap-registry.md)).
+Steps in order: `packages`, `docker`, `kubectl`, `helm`, `flux`, `k9s`, `yq`, `nkp`, `registry-image`.
+The disk grow and the workspace refresh run on every attempt. Then `complete`, and the air-gap download starts ([06](06-airgap-registry.md)).
 
 Log out and back in once so the `docker` group applies. `scripts/install-nkp.sh` checks `docker info`
 and stops if this user still cannot talk to the daemon.

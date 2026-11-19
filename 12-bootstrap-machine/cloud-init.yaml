@@ -10,7 +10,9 @@
 # Ubuntu 24.04 cloud image is the primary target. The same file also grows a
 # Rocky LVM root disk and installs packages with dnf when that is the image.
 #
-# The install runs in nkp-bootstrap.service, not inside cloud-init. Each finished
+# The install runs in nkp-bootstrap.service, not inside cloud-init. Every run first
+# downloads the latest scripts/bootstrap-host.sh from nkp-labs, so a fix pushed to git
+# needs no new paste: run `nkp-update --rerun` on the VM. Each finished
 # step leaves /var/lib/nkp-bootstrap/<step>.done. A network drop or a VM restart
 # re-runs the service and it continues from the first unfinished step.
 # The air-gapped bundle downloads afterwards in nkp-airgap-download.service and
@@ -60,317 +62,56 @@ write_files:
       NKP_VERSION=v2.19.1
       NKP_SKIP_AIRGAP=false
       NKP_LABS_REPO=https://github.com/fernandoquinino-ntx/nkp-labs.git
+      NKP_LABS_REF=main
 
-  - path: /usr/local/sbin/expand-root-disk.sh
-    permissions: "0755"
-    owner: root:root
-    content: |
-      #!/bin/bash
-      # noble-server-cloudimg-amd64.img: GPT, root is an ext4 partition (growpart + resize2fs).
-      # An LVM qcow2 (Ubuntu *-lvm.img or Rocky GenericCloud-LVM) grows the PV and the root LV.
-      # Safe to run again: an already grown disk is not an error.
-      set -euxo pipefail
-      export PATH="$PATH:/usr/sbin:/sbin:/usr/bin:/bin"
-      echo "=== disk expansion ==="
-      for dev in /sys/class/scsi_disk/*/device/rescan /sys/class/block/sd*/device/rescan /sys/class/block/vd*/device/rescan; do
-        [ -e "$dev" ] && echo 1 > "$dev" || true
-      done
-      udevadm settle || true
-      ROOT_SRC="$(findmnt -n -o SOURCE /)"
-      FSTYPE="$(findmnt -n -o FSTYPE /)"
-      echo "root=${ROOT_SRC} fstype=${FSTYPE}"
-      grow_disk() {
-        local src="$1" pk part out rc=0
-        pk="$(lsblk -no PKNAME "$src" 2>/dev/null | awk 'NF{print $1; exit}')"
-        part="$(lsblk -no PARTN "$src" 2>/dev/null | awk 'NF{print $1; exit}')"
-        [ -n "$pk" ] && [ -n "$part" ] || return 0
-        sgdisk -e "/dev/${pk}" || true
-        out="$(growpart "/dev/${pk}" "$part" 2>&1)" || rc=$?
-        echo "$out"
-        if [ "$rc" -ne 0 ] && ! echo "$out" | grep -q NOCHANGE; then
-          return "$rc"
-        fi
-        partprobe "/dev/${pk}" || true
-      }
-      case "$ROOT_SRC" in
-        /dev/mapper/*|/dev/dm-*)
-          PV="$(pvs --noheadings -o pv_name | awk 'NF{print $1; exit}')"
-          [ -n "${PV:-}" ] || { echo "no LVM physical volume found" >&2; exit 1; }
-          grow_disk "$PV"
-          pvresize "$PV"
-          VG="$(lvs --noheadings -o vg_name "$ROOT_SRC" | awk 'NF{print $1; exit}')"
-          FREE="$(vgs --noheadings -o vg_free_count "$VG" | awk 'NF{print $1; exit}')"
-          if [ "${FREE:-0}" -gt 0 ]; then
-            lvextend -l +100%FREE -r "$ROOT_SRC"
-          else
-            echo "volume group ${VG} has no free extents. Root LV already uses the disk."
-          fi
-          ;;
-        *)
-          grow_disk "$ROOT_SRC"
-          case "$FSTYPE" in
-            ext4|ext3) resize2fs "$ROOT_SRC" ;;
-            xfs) xfs_growfs / ;;
-            *) echo "unsupported root filesystem ${FSTYPE} on ${ROOT_SRC}" >&2; exit 1 ;;
-          esac
-          ;;
-      esac
-      df -h /
-      echo "=== disk expansion done ==="
-
+  # Small on purpose. The real install is scripts/bootstrap-host.sh in nkp-labs, fetched
+  # fresh on every run, so a fix pushed to git applies at the next run without a new paste.
   - path: /usr/local/sbin/install-nkp-bootstrap-tools.sh
     permissions: "0755"
     owner: root:root
     content: |
       #!/bin/bash
-      # Run by nkp-bootstrap.service. Every step is skipped once its .done marker exists,
-      # so a re-run after a network failure or a VM restart continues where it stopped.
-      set -Eeuo pipefail
+      # Download the latest bootstrap scripts from nkp-labs, then run them. If GitHub cannot
+      # be reached, run the copy from the last good download. With no copy at all, exit 1
+      # and systemd tries again in 60s.
+      set -uo pipefail
       export PATH="$PATH:/usr/sbin:/sbin:/usr/bin:/bin"
-      export HOME="${HOME:-/root}"
       [ -f /etc/default/nkp-bootstrap ] && . /etc/default/nkp-bootstrap
+      RAW="${NKP_LABS_RAW:-https://raw.githubusercontent.com/fernandoquinino-ntx/nkp-labs}/${NKP_LABS_REF:-main}/12-bootstrap-machine/scripts"
+      LIB="${NKP_LIB_DIR:-/usr/local/lib/nkp-bootstrap}"
       LOG="${NKP_LOG:-/var/log/nkp-bootstrap.log}"
-      STATE="${NKP_STATE_DIR:-/var/lib/nkp-bootstrap}"
-      BIN="${NKP_BIN_DIR:-/usr/local/bin}"
-      WS="${NKP_WORKSPACE:-/home/ubuntu/nkp-workspace}"
-      LABS="${NKP_LABS_DIR:-/opt/nkp-labs}"
-      NKP_USER="${NKP_USER:-ubuntu}"
-      mkdir -p "${STATE}"
-      touch "${LOG}"
-      chmod 0644 "${LOG}"
-      exec > >(tee -a "${LOG}") 2>&1
-      if command -v flock >/dev/null 2>&1; then
-        exec 9>"${STATE}/.lock"
-        flock -n 9 || { echo "another nkp bootstrap run holds ${STATE}/.lock"; exit 0; }
-      fi
-      attempt=$(( $(cat "${STATE}/attempts" 2>/dev/null || echo 0) + 1 ))
-      echo "${attempt}" > "${STATE}/attempts"
-      echo "===== $(date -u +%Y-%m-%dT%H:%M:%SZ) nkp bootstrap start pid=$$ attempt=${attempt} ====="
-      trap 'rc=$?; echo "===== FAILED line ${LINENO} exit ${rc} cmd=${BASH_COMMAND} at $(date -u +%Y-%m-%dT%H:%M:%SZ). systemd retries in 60s. ====="; exit ${rc}' ERR
-      set -x
-      NKP_VERSION="${NKP_VERSION:-v2.19.1}"
-      KUBECTL_VERSION="${KUBECTL_VERSION:-v1.36.2}"
-      K9S_VERSION="${K9S_VERSION:-v0.51.0}"
-      YQ_VERSION="${YQ_VERSION:-v4.47.1}"
-      NKP_BASE_URL="${NKP_DOWNLOAD_BASE_URL:-https://downloads.d2iq.com/dkp}"
-      NKP_LABS_REPO="${NKP_LABS_REPO:-https://github.com/fernandoquinino-ntx/nkp-labs.git}"
-      RETRY_MAX="${RETRY_MAX:-8}"
-      RETRY_DELAY="${RETRY_DELAY:-10}"
-      NET_WAIT_SECONDS="${NET_WAIT_SECONDS:-1800}"
-      case "$(uname -m)" in
-        x86_64|amd64) arch="amd64" ;;
-        aarch64|arm64) arch="arm64" ;;
-        *) echo "unsupported architecture: $(uname -m)" >&2; exit 3 ;;
-      esac
-      if [ -z "${NKP_SHA256:-}" ] && [ "${NKP_VERSION}" = "v2.19.1" ] && [ "${arch}" = "amd64" ]; then
-        NKP_SHA256=3d311ecb1848eadfd9e749f1ed4b451f0f16b63679fd537d62763051b396f770
-      fi
-
-      retry() {
-        local n=0 delay="${RETRY_DELAY}"
-        until "$@"; do
-          n=$((n + 1))
-          if [ "${n}" -ge "${RETRY_MAX}" ]; then
-            echo "retry: giving up after ${n} tries: $*"
-            return 1
-          fi
-          echo "retry ${n}/${RETRY_MAX} in ${delay}s: $*"
-          sleep "${delay}"
-          delay=$((delay * 2)); [ "${delay}" -le 300 ] || delay=300
-        done
-      }
-      fetch() {
-        rm -f "$2.part"
-        retry curl -fsSL --connect-timeout 20 --max-time 1800 -o "$2.part" "$1"
-        mv -f "$2.part" "$2"
-      }
-      stage() {
-        local name="$1"; shift
-        if [ -f "${STATE}/${name}.done" ]; then
-          echo "----- skip ${name} (done)"
-          return 0
+      mkdir -p "${LIB}"
+      log() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [loader] $*" | tee -a "${LOG}"; }
+      online=true
+      for f in bootstrap-host.sh expand-root-disk.sh update-workspace.sh; do
+        got=false
+        if [ "${online}" = true ]; then
+          for i in 1 2 3 4; do
+            # The query string skips the raw.githubusercontent.com cache (about 5 min).
+            if curl -fsSL --connect-timeout 15 --max-time 120 -o "${LIB}/${f}.new" "${RAW}/${f}?t=$(date +%s)" \
+                && bash -n "${LIB}/${f}.new"; then
+              chmod 0755 "${LIB}/${f}.new"
+              mv -f "${LIB}/${f}.new" "${LIB}/${f}"
+              got=true
+              break
+            fi
+            sleep $((i * 5))
+          done
         fi
-        echo "----- $(date -u +%Y-%m-%dT%H:%M:%SZ) stage ${name}"
-        "$@"
-        date -u +%Y-%m-%dT%H:%M:%SZ > "${STATE}/${name}.done"
-        echo "----- stage ${name} done"
-      }
-
-      wait_cloud_init() {
-        if command -v cloud-init >/dev/null 2>&1; then
-          timeout 900 cloud-init status --wait >/dev/null 2>&1 || true
-        fi
-      }
-      net_up() {
-        local url
-        for url in https://downloads.d2iq.com https://github.com https://dl.k8s.io; do
-          curl -sS -o /dev/null --connect-timeout 10 --max-time 20 "${url}" && return 0
-        done
-        return 1
-      }
-      wait_network() {
-        local waited=0
-        until net_up; do
-          if [ "${waited}" -ge "${NET_WAIT_SECONDS}" ]; then
-            echo "no internet after ${waited}s (DNS, proxy, or gateway). Exiting so systemd retries."
-            return 1
-          fi
-          echo "waiting for internet (${waited}s)"
-          sleep 15
-          waited=$((waited + 15))
-        done
-      }
-      apt_get() {
-        retry apt-get -o Acquire::Retries=5 -o DPkg::Lock::Timeout=600 "$@"
-      }
-      install_packages() {
-        if command -v apt-get >/dev/null 2>&1; then
-          export DEBIAN_FRONTEND=noninteractive
-          dpkg --configure -a || true
-          apt_get update
-          apt_get install -y -f
-          apt_get install -y ca-certificates curl gnupg jq tar unzip wget git \
-            openssh-server cloud-guest-utils gdisk lvm2 e2fsprogs xfsprogs parted \
-            conntrack ebtables iptables socat sshpass make python3 util-linux
-        elif command -v dnf >/dev/null 2>&1; then
-          retry dnf install -y --setopt=retries=10 ca-certificates curl gnupg2 jq tar unzip wget git \
-            openssh-server cloud-utils-growpart gdisk lvm2 e2fsprogs xfsprogs parted \
-            conntrack ebtables iptables socat sshpass make python3 util-linux
+        rm -f "${LIB}/${f}.new"
+        if [ "${got}" = true ]; then
+          log "fetched latest ${f} from ${RAW}"
         else
-          echo "no apt-get or dnf" >&2
-          return 3
+          online=false
+          log "could not fetch ${f}. Using the cached copy if there is one."
         fi
-      }
-      install_docker() {
-        if ! command -v docker >/dev/null 2>&1; then
-          if command -v apt-get >/dev/null 2>&1; then
-            . /etc/os-release
-            install -m 0755 -d /etc/apt/keyrings
-            fetch https://download.docker.com/linux/ubuntu/gpg /etc/apt/keyrings/docker.asc
-            chmod a+r /etc/apt/keyrings/docker.asc
-            echo "deb [arch=${arch} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu ${VERSION_CODENAME} stable" \
-              > /etc/apt/sources.list.d/docker.list
-            apt_get update
-            apt_get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-          else
-            fetch https://download.docker.com/linux/centos/docker-ce.repo /etc/yum.repos.d/docker-ce.repo
-            retry dnf install -y --setopt=retries=10 docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-          fi
-        fi
-        if command -v apt-get >/dev/null 2>&1; then
-          systemctl enable --now ssh
-        else
-          systemctl enable --now sshd
-        fi
-        systemctl enable --now docker
-        usermod -aG docker "${NKP_USER}" || true
-      }
-      install_kubectl() {
-        fetch "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${arch}/kubectl" /tmp/kubectl
-        install -m 0755 /tmp/kubectl "${BIN}/kubectl"
-        rm -f /tmp/kubectl
-        "${BIN}/kubectl" version --client
-      }
-      install_helm() {
-        fetch https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 /tmp/get-helm-3
-        retry env HELM_INSTALL_DIR="${BIN}" bash /tmp/get-helm-3
-        rm -f /tmp/get-helm-3
-        "${BIN}/helm" version
-      }
-      install_flux() {
-        fetch https://fluxcd.io/install.sh /tmp/install-flux.sh
-        retry bash /tmp/install-flux.sh "${BIN}"
-        rm -f /tmp/install-flux.sh
-        "${BIN}/flux" version --client || "${BIN}/flux" --version
-      }
-      install_k9s() {
-        fetch "https://github.com/derailed/k9s/releases/download/${K9S_VERSION}/k9s_Linux_${arch}.tar.gz" /tmp/k9s.tar.gz
-        tar -xzf /tmp/k9s.tar.gz -C /tmp k9s
-        install -m 0755 /tmp/k9s "${BIN}/k9s"
-        rm -f /tmp/k9s /tmp/k9s.tar.gz
-        "${BIN}/k9s" version
-      }
-      install_yq() {
-        fetch "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${arch}" /tmp/yq
-        install -m 0755 /tmp/yq "${BIN}/yq"
-        rm -f /tmp/yq
-        "${BIN}/yq" --version
-      }
-      install_nkp() {
-        local url tmp bin
-        url="${NKP_DOWNLOAD_URL:-${NKP_BASE_URL}/${NKP_VERSION}/nkp_${NKP_VERSION}_linux_${arch}.tar.gz}"
-        echo "downloading nkp from ${url}"
-        fetch "${url}" /tmp/nkp.tar.gz
-        if [ -n "${NKP_SHA256:-}" ]; then
-          if [ "$(sha256sum /tmp/nkp.tar.gz | awk '{print $1}')" != "${NKP_SHA256}" ]; then
-            rm -f /tmp/nkp.tar.gz
-            echo "nkp archive checksum mismatch. Removed it so the next run downloads it again." >&2
-            return 1
-          fi
-        fi
-        tmp="$(mktemp -d)"
-        tar -xzf /tmp/nkp.tar.gz -C "${tmp}"
-        bin="$(find "${tmp}" -type f -name nkp | head -n1)"
-        [ -n "${bin}" ] || { echo "nkp binary not found in archive" >&2; return 1; }
-        install -m 0755 "${bin}" "${BIN}/nkp"
-        rm -rf "${tmp}" /tmp/nkp.tar.gz
-        "${BIN}/nkp" version || true
-      }
-      clone_labs() {
-        rm -rf "${LABS}.new"
-        git clone --depth 1 "${NKP_LABS_REPO}" "${LABS}.new"
-      }
-      sync_workspace() {
-        retry clone_labs
-        rm -rf "${LABS}"
-        mv "${LABS}.new" "${LABS}"
-        # Copy over the lab without deleting anything. env, values.local.yaml,
-        # create-cluster.env, kubeconfigs, registry/ and airgap/ are not in git and stay.
-        mkdir -p "${WS}"
-        cp -a "${LABS}/12-bootstrap-machine/." "${WS}/"
-        chown -R "${NKP_USER}:${NKP_USER}" "${WS}"
-        chmod 0755 "${WS}"/scripts/*.sh
-      }
-      pull_registry_image() {
-        # setup-local-registry.sh needs registry:2 after the host loses internet.
-        retry docker pull registry:2
-      }
-
-      wait_cloud_init
-      wait_network
-      stage packages install_packages
-      # Not a stage: it is idempotent and picks up a disk grown in Prism after the first boot.
-      /usr/local/sbin/expand-root-disk.sh || echo "WARN disk expansion failed. Check the lines above. The next run tries again."
-      stage docker install_docker
-      stage kubectl install_kubectl
-      stage helm install_helm
-      stage flux install_flux
-      stage k9s install_k9s
-      stage yq install_yq
-      stage nkp install_nkp
-      stage workspace sync_workspace
-      stage registry-image pull_registry_image
-
-      echo "=== bootstrap toolchain ==="
-      docker --version
-      "${BIN}/kubectl" version --client
-      "${BIN}/helm" version
-      "${BIN}/k9s" version || true
-      "${BIN}/yq" --version
-      "${BIN}/nkp" version || true
-      echo "workspace: ${WS}"
-      date -u +%Y-%m-%dT%H:%M:%SZ > "${STATE}/complete"
-
-      if [ "${NKP_SKIP_AIRGAP:-false}" != "true" ]; then
-        echo "===== starting nkp-airgap-download.service (resumes after restarts) ====="
-        systemctl enable nkp-airgap-download.service
-        systemctl start --no-block nkp-airgap-download.service
-      else
-        echo "NKP_SKIP_AIRGAP=true — bundle not downloaded"
+      done
+      ln -sf "${LIB}/update-workspace.sh" "${NKP_BIN_DIR:-/usr/local/bin}/nkp-update"
+      if [ ! -f "${LIB}/bootstrap-host.sh" ]; then
+        log "no bootstrap-host.sh yet (no internet on the first run). systemd retries in 60s."
+        exit 1
       fi
-      set +x
-      echo "===== $(date -u +%Y-%m-%dT%H:%M:%SZ) nkp bootstrap done ====="
-      echo "log: ${LOG}"
+      exec bash "${LIB}/bootstrap-host.sh"
 
   - path: /etc/systemd/system/nkp-bootstrap.service
     permissions: "0644"

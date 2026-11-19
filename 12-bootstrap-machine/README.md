@@ -49,7 +49,10 @@ Use one path for a given cluster name.
 
 | File | What |
 |---|---|
-| `cloud-init.yaml` | Prism guest customization. Installs `nkp-bootstrap.service`, which grows the disk, installs the toolchain, clones this lab, and resumes after a failure or a restart. `nkp-bootstrap-status` shows progress |
+| `cloud-init.yaml` | Prism guest customization. A loader for `nkp-bootstrap.service` that downloads the latest `scripts/bootstrap-host.sh` on every run. `nkp-bootstrap-status` shows progress |
+| `scripts/bootstrap-host.sh` | the host install: packages, disk grow, Docker, CLIs, workspace, registry image. Resumes after a failure or a restart |
+| `scripts/update-workspace.sh` | `nkp-update` on the VM. Pulls the latest lab into `nkp-workspace` without touching your files. `--rerun` runs the bootstrap again |
+| `scripts/expand-root-disk.sh` | grows the root partition or LV. Safe to run again |
 | `env.example` | installer knobs (`CLUSTER_NAME`, `EXPECTED`, `INSTALL_KOMMANDER`). Copy to `env` |
 | `values.example.yaml` | NKP cluster values. Copy to `values.local.yaml` (gitignored) |
 | `scripts/install-nkp.sh` | Helm path: `nkp create bootstrap`, chart, kubeconfig, pivot, optional Kommander |

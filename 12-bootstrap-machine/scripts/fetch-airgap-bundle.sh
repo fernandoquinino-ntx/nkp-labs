@@ -90,7 +90,7 @@ if [ "${have}" -lt "${expected}" ]; then
       ;;
   esac
   if [ "${free_bytes}" -lt "${need}" ]; then
-    log "not enough free space for the air-gapped bundle. Grow the Prism disk (about 200 GiB), run sudo /usr/local/sbin/expand-root-disk.sh, then re-run."
+    log "not enough free space for the air-gapped bundle. Grow the Prism disk (about 200 GiB), run sudo bash /usr/local/lib/nkp-bootstrap/expand-root-disk.sh, then sudo systemctl start nkp-airgap-download."
     exit 3
   fi
 
