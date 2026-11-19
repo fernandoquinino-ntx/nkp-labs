@@ -70,6 +70,72 @@ if [ -n "${NKP_SHA256}" ] && [ -f "${nkp_tar}" ]; then
   echo "  nkp sha256 ok"
 fi
 
+# kubectl, helm, flux, k9s, yq and nkp are not .deb packages. They ship as binaries.
+# A static binary has no shared libraries. A dynamic one must be refused here, because
+# the .deb set was not built to satisfy it.
+python3 - "${STAGE}/downloads" <<'PY'
+import os, struct, sys
+root = sys.argv[1]
+
+def needed(blob):
+    if blob[:4] != b"\x7fELF" or blob[4] != 2 or blob[5] != 1:
+        return None
+    e_phoff = struct.unpack_from("<Q", blob, 32)[0]
+    e_phentsize, e_phnum = struct.unpack_from("<HH", blob, 54)
+    dyn = None
+    loads = []
+    for i in range(e_phnum):
+        off = e_phoff + i * e_phentsize
+        p_type = struct.unpack_from("<I", blob, off)[0]
+        p_offset, p_vaddr, _, p_filesz, _, _ = struct.unpack_from("<QQQQQQ", blob, off + 8)
+        if p_type == 1:
+            loads.append((p_vaddr, p_offset, p_filesz))
+        elif p_type == 2:
+            dyn = blob[p_offset:p_offset + p_filesz]
+    if dyn is None:
+        return []
+    ents = []
+    for i in range(0, len(dyn), 16):
+        tag, val = struct.unpack_from("<QQ", dyn, i)
+        ents.append((tag, val))
+        if tag == 0:
+            break
+    strtab = next(v for t, v in ents if t == 5)
+    so = next(fo + (strtab - va) for va, fo, sz in loads if va <= strtab < va + sz)
+    libs = []
+    for t, v in ents:
+        if t == 1:
+            end = blob.index(b"\0", so + v)
+            libs.append(blob[so + v:end].decode())
+    return libs
+
+bad = False
+for dirpath, _, files in os.walk(root):
+    for name in files:
+        path = os.path.join(dirpath, name)
+        blob = open(path, "rb").read(4)
+        if blob != b"\x7fELF":
+            inner = path
+            if name.endswith(".tar.gz"):
+                import tarfile
+                tf = tarfile.open(path)
+                for m in tf.getmembers():
+                    if not m.isfile():
+                        continue
+                    data = tf.extractfile(m).read()
+                    if data[:4] != b"\x7fELF":
+                        continue
+                    libs = needed(data)
+                    print(f"  {name}:{m.name} libs={libs or 'static'}")
+                    bad = bad or bool(libs)
+            continue
+        libs = needed(open(path, "rb").read())
+        print(f"  {name} libs={libs or 'static'}")
+        bad = bad or bool(libs)
+if bad:
+    sys.exit("a bundled installer needs a shared library. Add the providing Ubuntu package to APT_PACKAGES and rebuild.")
+PY
+
 echo "=== [2/5] lab snapshot from git ($(git -C "${REPO_ROOT}" rev-parse --short HEAD)) ==="
 git -C "${REPO_ROOT}" archive --format=tar HEAD 12-bootstrap-machine | tar -xf - -C "${STAGE}/labs"
 if [ -n "$(git -C "${REPO_ROOT}" status --porcelain -- 12-bootstrap-machine)" ]; then

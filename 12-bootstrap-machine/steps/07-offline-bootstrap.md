@@ -56,7 +56,7 @@ latest scripts. Before uploading, CI installs the bundle in an Ubuntu 24.04 cont
 
 | Folder in the bundle | What |
 |---|---|
-| `downloads/` | nkp v2.19.1 (sha256 checked), kubectl v1.36.2, Helm v3.22.1, Flux v2.10.0, k9s v0.51.0, yq v4.47.1 |
+| `downloads/` | nkp v2.19.1 (sha256 checked), kubectl v1.36.2, Helm v3.22.1, Flux v2.10.0, k9s v0.51.0, yq v4.47.1. These are not .deb packages. Each binary is static, so it has no shared libraries to add. The build fails if one starts needing a library |
 | `debs/` | apt repository: the Ubuntu 24.04 packages, Docker CE, and every dependency |
 | `images/registry-2.tar` | `registry:2` for [06](06-airgap-registry.md) |
 | `labs/` | this lab at the built commit (committed files only, no secrets) |
