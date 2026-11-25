@@ -116,3 +116,41 @@ fi
 
 echo "=== [create-cluster] nkp ${args[*]} ==="
 nkp "${args[@]}"
+
+# nkp create cluster records the Kommander name. It does not publish DNS.
+# Add the name to CoreDNS in this same run, once the API answers.
+if [ "${DRY_RUN}" != "true" ] && [ -n "${KOMMANDER_INGRESS_IP:-}" ] && [ -n "${CLUSTER_HOSTNAME:-}" ]; then
+  kc=""
+  for candidate in "${LAB}/${CLUSTER_NAME}.conf" "${HOME}/${CLUSTER_NAME}.conf" "${LAB}/kubeconfig"; do
+    [ -f "${candidate}" ] && kc="${candidate}" && break
+  done
+  [ -n "${kc}" ] || { echo "kubeconfig not found. CoreDNS hosts not applied." >&2; exit 1; }
+  echo "=== CoreDNS hosts: ${KOMMANDER_INGRESS_IP} ${CLUSTER_HOSTNAME} ==="
+  ready=0
+  for _ in $(seq 1 60); do
+    kubectl --kubeconfig "${kc}" -n kube-system get configmap coredns >/dev/null 2>&1 && ready=1 && break
+    sleep 10
+  done
+  [ "${ready}" = 1 ] || { echo "coredns ConfigMap did not appear" >&2; exit 1; }
+  corefile="$(mktemp)"
+  kubectl --kubeconfig "${kc}" -n kube-system get configmap coredns -o jsonpath='{.data.Corefile}' > "${corefile}"
+  python3 - "${corefile}" "${KOMMANDER_INGRESS_IP}" "${CLUSTER_HOSTNAME}" <<'PY'
+import pathlib, sys
+path, ip, name = sys.argv[1:]
+text = pathlib.Path(path).read_text()
+line = f"    {ip} {name}"
+if line.strip() in text:
+    sys.exit(0)
+block = "    hosts {\n" + line + "\n        fallthrough\n    }\n"
+marker = "    forward "
+if marker not in text:
+    sys.exit("Corefile has no forward line to anchor the hosts block")
+pathlib.Path(path).write_text(text.replace(marker, block + marker, 1))
+PY
+  kubectl --kubeconfig "${kc}" -n kube-system create configmap coredns \
+    --from-file=Corefile="${corefile}" --dry-run=client -o yaml \
+    | kubectl --kubeconfig "${kc}" apply -f -
+  kubectl --kubeconfig "${kc}" -n kube-system rollout restart deployment coredns
+  rm -f "${corefile}"
+  echo "=== CoreDNS restarted with ${CLUSTER_HOSTNAME} ==="
+fi
