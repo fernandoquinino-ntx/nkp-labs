@@ -119,14 +119,21 @@ if ($NkpPassword -and $nkpUser) {
     $NkpPassword = $null
 }
 
-# Source-code-verified permission matrix covering:
+# Source-code-verified & Nutanix-doc-verified master NKP permission matrix covering:
+#   - Management Cluster deploy + self-upgrades + Managed (Workload) Cluster lifecycle
 #   - CAREN preflight webhooks (ValidateCredentials -> Users.List, DomainManager.List/Products,
 #     Clusters, StorageContainers, Images, Subnets, AvailabilityZones)
-#   - CAPX v1.9/v1.10 (VMs, VMProfiles, GPUs, Categories, Projects, ResourceGroups, Tasks,
+#   - CAPX v1.9/v1.10 (VMs, VMProfiles, GPUs/PCIe, Categories, Projects, ResourceGroups, Tasks,
 #     VolumeGroups, ProtectionPolicies, RecoveryPlans)
 #   - CCM (DomainManager, Clusters, ClusterHost, Projects, ResourceGroups, Categories, VMs)
 #   - Nutanix IPAM provider (Subnets, Reserve/Unreserve Subnet IP)
-#   - Nutanix CSI 3.7/3.9 (Storage Containers / View Container, Volume Groups, Recovery Points)
+#   - Nutanix CSI 3.7/3.9 Volumes + Storage Container (Update Container Disks) + Recovery Points
+#   - Nutanix CSI 3.9 Files Storage / CSI System built-in role (RWX Shares, Snapshots, Clones)
+#   - Nutanix Image Builder / NIB (Packer Nutanix plugin: Images, OVA, Templates, Console Token)
+#   - VM Anti-Affinity & Host Affinity Policies, Image Placement Policies, Failure Domains
+#   - Flow Virtual Networking, Flow CNI (NKP 2.19+ VPC association, Floating IPs), & Flow Network
+#     Security / FNS (Entity Groups, Security Policies, Address Groups, Service Groups)
+#   - Metro / Disaster Recovery (Protection Policies, Recovery Plans, Failover Jobs) & Objects view
 # across Prism Central 2024.x, pc.7.3, pc.7.5, and pc.7.6+.
 #
 # EVERY listed operation name that exists (and is EXTERNAL/assignable) on this Prism Central
@@ -134,43 +141,69 @@ if ($NkpPassword -and $nkpUser) {
 # predecessors are resolved recursively below.
 # MinPc: "" = optional, "all" = always required, "7.3" = required on PC 7.3+, "7.5" = required on PC 7.5+
 $permissions = @(
-    # --- CAREN Preflight, IAM & Prism Central Domain Manager ---
+    # --- CAREN Preflight, IAM (read-only), Multidomain, Tasks, Batches, Monitoring & Licensing ---
     @{ Name = "View User";                                   MinPc = "7.5" },
+    @{ Name = "View User Group";                             MinPc = "" },
+    @{ Name = "View Role";                                   MinPc = "" },
+    @{ Name = "View Entity";                                 MinPc = "" },
+    @{ Name = "View Operation";                              MinPc = "" },
     @{ Name = "View Domain Manager";                         MinPc = "7.5" },
     @{ Name = "View Domain Manager Product";                 MinPc = "" },
+    @{ Name = "View Domain Manager Registration";            MinPc = "" },
     @{ Name = "View Prism Central";                          MinPc = "" },
+    @{ Name = "View Domain";                                 MinPc = "" },
+    @{ Name = "View Local Domain";                           MinPc = "" },
+    @{ Name = "View Location";                               MinPc = "" },
     @{ Name = "View Task";                                   MinPc = "7.3" },
+    @{ Name = "Cancel Task";                                 MinPc = "" },
     @{ Name = "Fetch Task Response";                         MinPc = "" },
+    @{ Name = "Read Batches";                                MinPc = "" },
+    @{ Name = "Submit Batch";                                MinPc = "" },
     @{ Name = "View Availability Zone";                      MinPc = "" },
+    @{ Name = "View Alert";                                  MinPc = "" },
+    @{ Name = "View Event";                                  MinPc = "" },
+    @{ Name = "View Licenses";                               MinPc = "" },
+    @{ Name = "View License Entitlements";                   MinPc = "" },
+    @{ Name = "View License Features";                       MinPc = "" },
 
-    # --- AHV VM & VM Profiles (v4 + legacy v3) ---
+    # --- AHV VM, VM Profiles, NIB / Upgrades, OVA, Templates & Affinity Policies ---
     @{ Name = "Create New Virtual Machine";                  MinPc = "7.3" },
     @{ Name = "Create Virtual Machine";                      MinPc = "" },
+    @{ Name = "Clone Existing Virtual Machine";              MinPc = "" },
     @{ Name = "Delete Existing Virtual Machine";             MinPc = "7.3" },
     @{ Name = "Delete Virtual Machine";                      MinPc = "" },
     @{ Name = "View Existing Virtual Machine";               MinPc = "7.3" },
     @{ Name = "View Virtual Machine";                        MinPc = "" },
+    @{ Name = "View Virtual Machine Stats";                  MinPc = "" },
+    @{ Name = "View Virtual Machine NGT";                    MinPc = "" },
     @{ Name = "Update Virtual Machine";                      MinPc = "" },
     @{ Name = "Update Virtual Machine Basic Config";         MinPc = "" },
     @{ Name = "Update Virtual Machine Custom Attributes";    MinPc = "" },
     @{ Name = "Update Virtual Machine Project";              MinPc = "" },
+    @{ Name = "Revert Existing Virtual Machine";             MinPc = "" },
     @{ Name = "Customise Virtual Machine Guest";             MinPc = "" },
     @{ Name = "Assign Virtual Machine Owner";                MinPc = "" },
+    @{ Name = "Generate VM Console Token";                   MinPc = "" },
     @{ Name = "Power On Virtual Machine";                    MinPc = "all" },
     @{ Name = "Power Off Virtual Machine";                   MinPc = "" },
     @{ Name = "Power Cycle Virtual Machine";                 MinPc = "" },
     @{ Name = "Reset Virtual Machine";                       MinPc = "" },
     @{ Name = "ACPI Shutdown Virtual Machine";               MinPc = "" },
+    @{ Name = "ACPI Reboot Virtual Machine";                 MinPc = "" },
     @{ Name = "Guest Shutdown Virtual Machine";              MinPc = "" },
+    @{ Name = "Guest Reboot Virtual Machine";                MinPc = "" },
     @{ Name = "Create Virtual Machine Disk";                 MinPc = "all" },
     @{ Name = "Delete Virtual Machine Disk";                 MinPc = "all" },
     @{ Name = "Update Virtual Machine Disk";                 MinPc = "" },
     @{ Name = "Update Virtual Machine Disk List";            MinPc = "" },
+    @{ Name = "Update Virtual Machine Disk Custom Attributes"; MinPc = "" },
     @{ Name = "View Virtual Machine Disk";                   MinPc = "all" },
+    @{ Name = "View Virtual Machine Disk Stats";             MinPc = "" },
     @{ Name = "Create Virtual Machine NIC";                  MinPc = "7.5" },
     @{ Name = "Update Virtual Machine NIC";                  MinPc = "7.5" },
     @{ Name = "Delete Virtual Machine NIC";                  MinPc = "" },
     @{ Name = "View Virtual Machine NIC";                    MinPc = "7.5" },
+    @{ Name = "View Virtual Machine NIC Stats";              MinPc = "" },
     @{ Name = "Assign Virtual Machine NIC IP";               MinPc = "" },
     @{ Name = "Release Virtual Machine NIC IP";              MinPc = "" },
     @{ Name = "Associate Virtual Machine Categories";        MinPc = "" },
@@ -192,6 +225,24 @@ $permissions = @(
     @{ Name = "View Virtual Machine Serial Port";            MinPc = "" },
     @{ Name = "View Virtual Machine Profile";                MinPc = "" },
     @{ Name = "Deploy Virtual Machine From VM Profile";      MinPc = "" },
+    @{ Name = "View Ova";                                    MinPc = "" },
+    @{ Name = "Create Ova";                                  MinPc = "" },
+    @{ Name = "Delete Ova";                                  MinPc = "" },
+    @{ Name = "Deploy Ova";                                  MinPc = "" },
+    @{ Name = "Download Ova";                                MinPc = "" },
+    @{ Name = "View VM Templates";                           MinPc = "" },
+    @{ Name = "Create VM Templates";                         MinPc = "" },
+    @{ Name = "Deploy VM Templates";                         MinPc = "" },
+    @{ Name = "View VM Anti Affinity Policy";                MinPc = "" },
+    @{ Name = "Create VM Anti Affinity Policy";              MinPc = "" },
+    @{ Name = "Update VM Anti Affinity Policy";              MinPc = "" },
+    @{ Name = "Delete VM Anti Affinity Policy";              MinPc = "" },
+    @{ Name = "View VM Anti Affinity Policy VM Compliance States"; MinPc = "" },
+    @{ Name = "View VM Host Affinity Policy";                MinPc = "" },
+    @{ Name = "Create VM Host Affinity Policy";              MinPc = "" },
+    @{ Name = "Update VM Host Affinity Policy";              MinPc = "" },
+    @{ Name = "Delete VM Host Affinity Policy";              MinPc = "" },
+    @{ Name = "View VM Host Affinity Policy VM Compliance States"; MinPc = "" },
 
     # --- Categories (v4 for PC 7.3/7.5+ AND legacy v3) ---
     @{ Name = "Create Category";                             MinPc = "7.3" },
@@ -211,20 +262,28 @@ $permissions = @(
     @{ Name = "Update Category Mapping";                     MinPc = "" },
     @{ Name = "View Category Mapping";                       MinPc = "" },
 
-    # --- Cluster, Host, GPU Profiles, Storage Container, Project, Resource Group, Image ---
+    # --- Cluster, Host, GPU/PCIe Profiles, Storage Container, Project, Resource Group, Image ---
     @{ Name = "View Cluster";                                MinPc = "all" },
+    @{ Name = "View Cluster Stats";                          MinPc = "" },
+    @{ Name = "View Cluster Profile";                        MinPc = "" },
     @{ Name = "View Host";                                   MinPc = "all" },
+    @{ Name = "View Host Stats";                             MinPc = "" },
+    @{ Name = "View Host Nic";                               MinPc = "" },
     @{ Name = "View Cluster Host";                           MinPc = "7.5" },
+    @{ Name = "View Cluster Host Nic";                       MinPc = "" },
     @{ Name = "View Cluster Pgpu Profiles";                  MinPc = "" },
     @{ Name = "View Cluster Vgpu Profiles";                  MinPc = "" },
     @{ Name = "View Physical Gpu Profile";                   MinPc = "" },
     @{ Name = "View Virtual Gpu Profile";                    MinPc = "" },
+    @{ Name = "View Pcie Device";                            MinPc = "" },
     @{ Name = "View Cluster Storage Config";                 MinPc = "" },
     @{ Name = "View Disk";                                   MinPc = "" },
+    @{ Name = "View Disk Stats";                             MinPc = "" },
     @{ Name = "Get Cluster Network Segment";                 MinPc = "" },
     @{ Name = "View Container";                              MinPc = "" },
     @{ Name = "View Container Stats";                        MinPc = "" },
     @{ Name = "View Container Datastore";                    MinPc = "" },
+    @{ Name = "Update Container Disks";                      MinPc = "" },
     @{ Name = "View Storage Container";                      MinPc = "" },
     @{ Name = "View Storage Container Stats";                MinPc = "" },
     @{ Name = "View Storage Container Datastore";            MinPc = "" },
@@ -236,20 +295,59 @@ $permissions = @(
     @{ Name = "Create Image";                                MinPc = "" },
     @{ Name = "Delete Image";                                MinPc = "" },
     @{ Name = "Update Image";                                MinPc = "" },
+    @{ Name = "Download Image";                              MinPc = "" },
+    @{ Name = "Migrate Image";                               MinPc = "" },
+    @{ Name = "View Image Placement Policy";                 MinPc = "" },
+    @{ Name = "View Content Repository";                     MinPc = "" },
     @{ Name = "View Content Repository Item";                MinPc = "" },
 
-    # --- Networking & IPAM ---
+    # --- Networking, IPAM, Flow Virtual Networking & Flow CNI (NKP 2.19+) ---
     @{ Name = "View Subnet";                                 MinPc = "all" },
+    @{ Name = "Update Subnet";                               MinPc = "" },
+    @{ Name = "View Subnet Vnic";                            MinPc = "" },
     @{ Name = "View Overlay Subnet";                         MinPc = "" },
     @{ Name = "View External Subnet";                        MinPc = "" },
     @{ Name = "View Overlay External Subnet";                MinPc = "" },
     @{ Name = "View Remote Subnet";                          MinPc = "" },
     @{ Name = "View VPC";                                    MinPc = "" },
+    @{ Name = "Update VPC";                                  MinPc = "" },
+    @{ Name = "View VPC Route Table";                        MinPc = "" },
+    @{ Name = "View Route Table Route";                      MinPc = "" },
+    @{ Name = "View Virtual Switch";                         MinPc = "" },
+    @{ Name = "View Nic Profile";                            MinPc = "" },
+    @{ Name = "View Cluster Networking Capabilities";        MinPc = "" },
+    @{ Name = "View Network Controller";                     MinPc = "" },
+    @{ Name = "View Network Gateway";                        MinPc = "" },
+    @{ Name = "View Load Balancer Session";                  MinPc = "" },
+    @{ Name = "View Routing Policy";                         MinPc = "" },
+    @{ Name = "View Floating Ip";                            MinPc = "" },
+    @{ Name = "Create Floating Ip";                          MinPc = "" },
+    @{ Name = "Update Floating Ip";                          MinPc = "" },
+    @{ Name = "Delete Floating Ip";                          MinPc = "" },
     @{ Name = "Reserve Subnet Ip";                           MinPc = "" },
     @{ Name = "Unreserve Subnet Ip";                         MinPc = "" },
     @{ Name = "View Subnet Reserved Ip";                     MinPc = "" },
 
-    # --- Volume Groups & CSI 3.7 / 3.9 ---
+    # --- Flow Network Security / FNS for Kubernetes (microseg) ---
+    @{ Name = "View Entity Group";                           MinPc = "" },
+    @{ Name = "Create Entity Group";                         MinPc = "" },
+    @{ Name = "Update Entity Group";                         MinPc = "" },
+    @{ Name = "Delete Entity Group";                         MinPc = "" },
+    @{ Name = "View Flow Policy";                            MinPc = "" },
+    @{ Name = "View Rules Flow Policy";                      MinPc = "" },
+    @{ Name = "Create Flow Policy";                          MinPc = "" },
+    @{ Name = "Update Flow Policy";                          MinPc = "" },
+    @{ Name = "Delete Flow Policy";                          MinPc = "" },
+    @{ Name = "View Address Group";                          MinPc = "" },
+    @{ Name = "Create Address Group";                        MinPc = "" },
+    @{ Name = "Update Address Group";                        MinPc = "" },
+    @{ Name = "Delete Address Group";                        MinPc = "" },
+    @{ Name = "View Service Group";                          MinPc = "" },
+    @{ Name = "Create Service Group";                        MinPc = "" },
+    @{ Name = "Update Service Group";                        MinPc = "" },
+    @{ Name = "Delete Service Group";                        MinPc = "" },
+
+    # --- Volume Groups & CSI 3.7 / 3.9 Block Storage ---
     @{ Name = "Create Volume Group";                         MinPc = "" },
     @{ Name = "Delete Volume Group";                         MinPc = "" },
     @{ Name = "Update Volume Group";                         MinPc = "" },
@@ -274,13 +372,28 @@ $permissions = @(
     @{ Name = "Detach Volume Group From External NVMF Client"; MinPc = "" },
     @{ Name = "View External ISCSI Client";                  MinPc = "" },
     @{ Name = "Update External ISCSI Client";                MinPc = "" },
+    @{ Name = "View External NVMF Clients";                  MinPc = "" },
     @{ Name = "View Volume Group ISCSI Attachments";         MinPc = "" },
     @{ Name = "Associate Volume Group Categories";           MinPc = "" },
     @{ Name = "Disassociate Volume Group Categories";        MinPc = "" },
     @{ Name = "Update Volume Group Categories";              MinPc = "" },
     @{ Name = "View Volume Group Category Associations";     MinPc = "" },
 
-    # --- Data Protection / Recovery Points (CSI snapshots & clones) ---
+    # --- Nutanix Files Storage / CSI 3.9 RWX Dynamic NFS Shares (CSI System role) ---
+    @{ Name = "View File Server";                            MinPc = "" },
+    @{ Name = "View File Server Stats";                      MinPc = "" },
+    @{ Name = "View File Server Share";                      MinPc = "" },
+    @{ Name = "View File Server Share Stats";                MinPc = "" },
+    @{ Name = "Create File Server Share";                    MinPc = "" },
+    @{ Name = "Update File Server Share";                    MinPc = "" },
+    @{ Name = "Delete File Server Share";                    MinPc = "" },
+    @{ Name = "Clone File Server Share";                     MinPc = "" },
+    @{ Name = "View Snapshot File Server Share";             MinPc = "" },
+    @{ Name = "Create File Server Share Snapshot";           MinPc = "" },
+    @{ Name = "Delete Snapshot File Server Share";           MinPc = "" },
+    @{ Name = "Restore File Server Share";                   MinPc = "" },
+
+    # --- Data Protection / Recovery Points (CSI snapshots & clones, NDK) ---
     @{ Name = "Create Recovery Point";                       MinPc = "" },
     @{ Name = "Delete Recovery Point";                       MinPc = "" },
     @{ Name = "View Recovery Point";                         MinPc = "" },
@@ -297,12 +410,18 @@ $permissions = @(
     @{ Name = "Delete AHV VM Recovery Point";                MinPc = "" },
     @{ Name = "Restore AHV VM Recovery Point";               MinPc = "" },
     @{ Name = "View AHV VM Recovery Point";                  MinPc = "" },
+    @{ Name = "View Protected Resource";                     MinPc = "" },
+    @{ Name = "Promote Protected Resource";                  MinPc = "" },
+    @{ Name = "Restore Protected Resource";                  MinPc = "" },
 
-    # --- Metro / Disaster Recovery (optional, used by CAPX NutanixMetro / vHA) ---
+    # --- Metro / Disaster Recovery (CAPX NutanixMetro / vHA / NDK DR) ---
     @{ Name = "View Protection Policy";                      MinPc = "" },
     @{ Name = "Create Protection Policy";                    MinPc = "" },
     @{ Name = "Update Protection Policy";                    MinPc = "" },
     @{ Name = "Delete Protection Policy";                    MinPc = "" },
+    @{ Name = "View Protection Policy Consistency Rule";     MinPc = "" },
+    @{ Name = "View Entity Sync Policy";                     MinPc = "" },
+    @{ Name = "Sync Entity Sync Policy";                     MinPc = "" },
     @{ Name = "View Recovery Plan";                          MinPc = "" },
     @{ Name = "Create Recovery Plan";                        MinPc = "" },
     @{ Name = "Update Recovery Plan";                        MinPc = "" },
@@ -310,7 +429,24 @@ $permissions = @(
     @{ Name = "View Recovery Plan Config";                   MinPc = "" },
     @{ Name = "Create Recovery Plan Config";                 MinPc = "" },
     @{ Name = "Update Recovery Plan Config";                 MinPc = "" },
-    @{ Name = "Delete Recovery Plan Config";                 MinPc = "" }
+    @{ Name = "Delete Recovery Plan Config";                 MinPc = "" },
+    @{ Name = "View Recovery Plan Job Config";               MinPc = "" },
+    @{ Name = "View Recovery Plan Job Execution Steps";      MinPc = "" },
+    @{ Name = "View Recovery Plan Job Validation Errors";    MinPc = "" },
+    @{ Name = "Validate Recovery Plan Config";               MinPc = "" },
+    @{ Name = "Planned Failover Recovery Plan Config";       MinPc = "" },
+    @{ Name = "Unplanned Failover Recovery Plan Config";     MinPc = "" },
+    @{ Name = "Test Failover Recovery Plan Config";          MinPc = "" },
+    @{ Name = "Resume Protection Recovery Plan Config";      MinPc = "" },
+    @{ Name = "Cleanup Resources Recovery Plan Config";      MinPc = "" },
+
+    # --- Nutanix Objects / COSI (read-only visibility) ---
+    @{ Name = "View Object Store";                           MinPc = "" },
+    @{ Name = "View Buckets Object Store";                   MinPc = "" },
+    @{ Name = "View Endpoint Object Store";                  MinPc = "" },
+    @{ Name = "View Object Store Certificate";               MinPc = "" },
+    @{ Name = "View Object Store Stats";                     MinPc = "" },
+    @{ Name = "View Multicluster Object Store";              MinPc = "" }
 )
 
 function ConvertTo-Norm([string]$Value) {
@@ -666,7 +802,13 @@ while ($queue.Count -gt 0) {
 }
 
 Write-Host "matched $($directList.Count) direct permissions + $($resolvedRelated.Count) predecessor/related operations (total $($selectedById.Count) from $($operations.Count) PC operations)"
-if ($missingOptional.Count) { Write-Host "not on this Prism Central (optional): $($missingOptional -join ', ')" }
+if ($missingOptional.Count) {
+    if ($PrintOnly -or $missingOptional.Count -le 12) {
+        Write-Host "not on this Prism Central (optional, $($missingOptional.Count)): $($missingOptional -join ', ')"
+    } else {
+        Write-Host "skipped $($missingOptional.Count) optional/service-specific operations not enabled on this Prism Central (use -PrintOnly to list all)"
+    }
+}
 if ($missingRequired.Count) { throw "missing required permissions: $($missingRequired -join ', ')" }
 
 if ($PrintOnly) {
@@ -690,7 +832,7 @@ $roles = @(Get-Pages "$iamBase/authz/roles")
 $role = $roles | Where-Object { $_.displayName -eq $roleName } | Select-Object -First 1
 $pcTag = if ($pcVer) { "PC $($pcVer.Raw)" } else { "PC v4" }
 # Note: Prism Central IAM v4 Role.description forbids ()+&%<>;"'`/\ characters
-$roleDesc = "Permissions for NKP 2.19 CAPX, CCM, CAREN, IPAM, and CSI 3.9 on $pcTag with auto-resolved related operations."
+$roleDesc = "NKP 2.19 master role for CAPX, CCM, CAREN, IPAM, CSI, Files, NIB, Flow, and DR on $pcTag with auto-resolved related operations."
 $body = @{
     displayName = $roleName
     description = $roleDesc

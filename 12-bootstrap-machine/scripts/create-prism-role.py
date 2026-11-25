@@ -40,42 +40,68 @@ IAM_VERSIONS = ["v4.0", "v4.1", "v4.1.b3", "v4.1.b2", "v4.1.b1", "v4.0.b1"]
 
 # (operation display name, min_pc_required: "" | "all" | "7.3" | "7.5")
 PERMISSIONS = [
-    # --- CAREN Preflight, IAM & Prism Central Domain Manager ---
+    # --- CAREN Preflight, IAM (read-only), Multidomain, Tasks, Batches, Monitoring & Licensing ---
     ("View User", "7.5"),
+    ("View User Group", ""),
+    ("View Role", ""),
+    ("View Entity", ""),
+    ("View Operation", ""),
     ("View Domain Manager", "7.5"),
     ("View Domain Manager Product", ""),
+    ("View Domain Manager Registration", ""),
     ("View Prism Central", ""),
+    ("View Domain", ""),
+    ("View Local Domain", ""),
+    ("View Location", ""),
     ("View Task", "7.3"),
+    ("Cancel Task", ""),
     ("Fetch Task Response", ""),
+    ("Read Batches", ""),
+    ("Submit Batch", ""),
     ("View Availability Zone", ""),
-    # --- AHV VM & VM Profiles (v4 + legacy v3) ---
+    ("View Alert", ""),
+    ("View Event", ""),
+    ("View Licenses", ""),
+    ("View License Entitlements", ""),
+    ("View License Features", ""),
+    # --- AHV VM, VM Profiles, NIB / Upgrades, OVA, Templates & Affinity Policies ---
     ("Create New Virtual Machine", "7.3"),
     ("Create Virtual Machine", ""),
+    ("Clone Existing Virtual Machine", ""),
     ("Delete Existing Virtual Machine", "7.3"),
     ("Delete Virtual Machine", ""),
     ("View Existing Virtual Machine", "7.3"),
     ("View Virtual Machine", ""),
+    ("View Virtual Machine Stats", ""),
+    ("View Virtual Machine NGT", ""),
     ("Update Virtual Machine", ""),
     ("Update Virtual Machine Basic Config", ""),
     ("Update Virtual Machine Custom Attributes", ""),
     ("Update Virtual Machine Project", ""),
+    ("Revert Existing Virtual Machine", ""),
     ("Customise Virtual Machine Guest", ""),
     ("Assign Virtual Machine Owner", ""),
+    ("Generate VM Console Token", ""),
     ("Power On Virtual Machine", "all"),
     ("Power Off Virtual Machine", ""),
     ("Power Cycle Virtual Machine", ""),
     ("Reset Virtual Machine", ""),
     ("ACPI Shutdown Virtual Machine", ""),
+    ("ACPI Reboot Virtual Machine", ""),
     ("Guest Shutdown Virtual Machine", ""),
+    ("Guest Reboot Virtual Machine", ""),
     ("Create Virtual Machine Disk", "all"),
     ("Delete Virtual Machine Disk", "all"),
     ("Update Virtual Machine Disk", ""),
     ("Update Virtual Machine Disk List", ""),
+    ("Update Virtual Machine Disk Custom Attributes", ""),
     ("View Virtual Machine Disk", "all"),
+    ("View Virtual Machine Disk Stats", ""),
     ("Create Virtual Machine NIC", "7.5"),
     ("Update Virtual Machine NIC", "7.5"),
     ("Delete Virtual Machine NIC", ""),
     ("View Virtual Machine NIC", "7.5"),
+    ("View Virtual Machine NIC Stats", ""),
     ("Assign Virtual Machine NIC IP", ""),
     ("Release Virtual Machine NIC IP", ""),
     ("Associate Virtual Machine Categories", ""),
@@ -97,6 +123,24 @@ PERMISSIONS = [
     ("View Virtual Machine Serial Port", ""),
     ("View Virtual Machine Profile", ""),
     ("Deploy Virtual Machine From VM Profile", ""),
+    ("View Ova", ""),
+    ("Create Ova", ""),
+    ("Delete Ova", ""),
+    ("Deploy Ova", ""),
+    ("Download Ova", ""),
+    ("View VM Templates", ""),
+    ("Create VM Templates", ""),
+    ("Deploy VM Templates", ""),
+    ("View VM Anti Affinity Policy", ""),
+    ("Create VM Anti Affinity Policy", ""),
+    ("Update VM Anti Affinity Policy", ""),
+    ("Delete VM Anti Affinity Policy", ""),
+    ("View VM Anti Affinity Policy VM Compliance States", ""),
+    ("View VM Host Affinity Policy", ""),
+    ("Create VM Host Affinity Policy", ""),
+    ("Update VM Host Affinity Policy", ""),
+    ("Delete VM Host Affinity Policy", ""),
+    ("View VM Host Affinity Policy VM Compliance States", ""),
     # --- Categories (v4 for PC 7.3/7.5+ AND legacy v3) ---
     ("Create Category", "7.3"),
     ("Delete Category", "7.3"),
@@ -114,20 +158,28 @@ PERMISSIONS = [
     ("Delete Category Mapping", ""),
     ("Update Category Mapping", ""),
     ("View Category Mapping", ""),
-    # --- Cluster, Host, GPU Profiles, Storage Container, Project, Resource Group, Image ---
+    # --- Cluster, Host, GPU/PCIe Profiles, Storage Container, Project, Resource Group, Image ---
     ("View Cluster", "all"),
+    ("View Cluster Stats", ""),
+    ("View Cluster Profile", ""),
     ("View Host", "all"),
+    ("View Host Stats", ""),
+    ("View Host Nic", ""),
     ("View Cluster Host", "7.5"),
+    ("View Cluster Host Nic", ""),
     ("View Cluster Pgpu Profiles", ""),
     ("View Cluster Vgpu Profiles", ""),
     ("View Physical Gpu Profile", ""),
     ("View Virtual Gpu Profile", ""),
+    ("View Pcie Device", ""),
     ("View Cluster Storage Config", ""),
     ("View Disk", ""),
+    ("View Disk Stats", ""),
     ("Get Cluster Network Segment", ""),
     ("View Container", ""),
     ("View Container Stats", ""),
     ("View Container Datastore", ""),
+    ("Update Container Disks", ""),
     ("View Storage Container", ""),
     ("View Storage Container Stats", ""),
     ("View Storage Container Datastore", ""),
@@ -139,18 +191,56 @@ PERMISSIONS = [
     ("Create Image", ""),
     ("Delete Image", ""),
     ("Update Image", ""),
+    ("Download Image", ""),
+    ("Migrate Image", ""),
+    ("View Image Placement Policy", ""),
+    ("View Content Repository", ""),
     ("View Content Repository Item", ""),
-    # --- Networking & IPAM ---
+    # --- Networking, IPAM, Flow Virtual Networking & Flow CNI (NKP 2.19+) ---
     ("View Subnet", "all"),
+    ("Update Subnet", ""),
+    ("View Subnet Vnic", ""),
     ("View Overlay Subnet", ""),
     ("View External Subnet", ""),
     ("View Overlay External Subnet", ""),
     ("View Remote Subnet", ""),
     ("View VPC", ""),
+    ("Update VPC", ""),
+    ("View VPC Route Table", ""),
+    ("View Route Table Route", ""),
+    ("View Virtual Switch", ""),
+    ("View Nic Profile", ""),
+    ("View Cluster Networking Capabilities", ""),
+    ("View Network Controller", ""),
+    ("View Network Gateway", ""),
+    ("View Load Balancer Session", ""),
+    ("View Routing Policy", ""),
+    ("View Floating Ip", ""),
+    ("Create Floating Ip", ""),
+    ("Update Floating Ip", ""),
+    ("Delete Floating Ip", ""),
     ("Reserve Subnet Ip", ""),
     ("Unreserve Subnet Ip", ""),
     ("View Subnet Reserved Ip", ""),
-    # --- Volume Groups & CSI 3.7 / 3.9 ---
+    # --- Flow Network Security / FNS for Kubernetes (microseg) ---
+    ("View Entity Group", ""),
+    ("Create Entity Group", ""),
+    ("Update Entity Group", ""),
+    ("Delete Entity Group", ""),
+    ("View Flow Policy", ""),
+    ("View Rules Flow Policy", ""),
+    ("Create Flow Policy", ""),
+    ("Update Flow Policy", ""),
+    ("Delete Flow Policy", ""),
+    ("View Address Group", ""),
+    ("Create Address Group", ""),
+    ("Update Address Group", ""),
+    ("Delete Address Group", ""),
+    ("View Service Group", ""),
+    ("Create Service Group", ""),
+    ("Update Service Group", ""),
+    ("Delete Service Group", ""),
+    # --- Volume Groups & CSI 3.7 / 3.9 Block Storage ---
     ("Create Volume Group", ""),
     ("Delete Volume Group", ""),
     ("Update Volume Group", ""),
@@ -175,12 +265,26 @@ PERMISSIONS = [
     ("Detach Volume Group From External NVMF Client", ""),
     ("View External ISCSI Client", ""),
     ("Update External ISCSI Client", ""),
+    ("View External NVMF Clients", ""),
     ("View Volume Group ISCSI Attachments", ""),
     ("Associate Volume Group Categories", ""),
     ("Disassociate Volume Group Categories", ""),
     ("Update Volume Group Categories", ""),
     ("View Volume Group Category Associations", ""),
-    # --- Data Protection / Recovery Points (CSI snapshots & clones) ---
+    # --- Nutanix Files Storage / CSI 3.9 RWX Dynamic NFS Shares (CSI System role) ---
+    ("View File Server", ""),
+    ("View File Server Stats", ""),
+    ("View File Server Share", ""),
+    ("View File Server Share Stats", ""),
+    ("Create File Server Share", ""),
+    ("Update File Server Share", ""),
+    ("Delete File Server Share", ""),
+    ("Clone File Server Share", ""),
+    ("View Snapshot File Server Share", ""),
+    ("Create File Server Share Snapshot", ""),
+    ("Delete Snapshot File Server Share", ""),
+    ("Restore File Server Share", ""),
+    # --- Data Protection / Recovery Points (CSI snapshots & clones, NDK) ---
     ("Create Recovery Point", ""),
     ("Delete Recovery Point", ""),
     ("View Recovery Point", ""),
@@ -197,11 +301,17 @@ PERMISSIONS = [
     ("Delete AHV VM Recovery Point", ""),
     ("Restore AHV VM Recovery Point", ""),
     ("View AHV VM Recovery Point", ""),
-    # --- Metro / Disaster Recovery (optional, used by CAPX NutanixMetro / vHA) ---
+    ("View Protected Resource", ""),
+    ("Promote Protected Resource", ""),
+    ("Restore Protected Resource", ""),
+    # --- Metro / Disaster Recovery (CAPX NutanixMetro / vHA / NDK DR) ---
     ("View Protection Policy", ""),
     ("Create Protection Policy", ""),
     ("Update Protection Policy", ""),
     ("Delete Protection Policy", ""),
+    ("View Protection Policy Consistency Rule", ""),
+    ("View Entity Sync Policy", ""),
+    ("Sync Entity Sync Policy", ""),
     ("View Recovery Plan", ""),
     ("Create Recovery Plan", ""),
     ("Update Recovery Plan", ""),
@@ -210,6 +320,22 @@ PERMISSIONS = [
     ("Create Recovery Plan Config", ""),
     ("Update Recovery Plan Config", ""),
     ("Delete Recovery Plan Config", ""),
+    ("View Recovery Plan Job Config", ""),
+    ("View Recovery Plan Job Execution Steps", ""),
+    ("View Recovery Plan Job Validation Errors", ""),
+    ("Validate Recovery Plan Config", ""),
+    ("Planned Failover Recovery Plan Config", ""),
+    ("Unplanned Failover Recovery Plan Config", ""),
+    ("Test Failover Recovery Plan Config", ""),
+    ("Resume Protection Recovery Plan Config", ""),
+    ("Cleanup Resources Recovery Plan Config", ""),
+    # --- Nutanix Objects / COSI (read-only visibility) ---
+    ("View Object Store", ""),
+    ("View Buckets Object Store", ""),
+    ("View Endpoint Object Store", ""),
+    ("View Object Store Certificate", ""),
+    ("View Object Store Stats", ""),
+    ("View Multicluster Object Store", ""),
 ]
 
 
@@ -554,7 +680,13 @@ def main():
         f"(total {len(selected_by_id)} from {len(operations)} PC operations)"
     )
     if missing_optional:
-        print("not on this Prism Central (optional): " + ", ".join(missing_optional))
+        if print_only or len(missing_optional) <= 12:
+            print(f"not on this Prism Central (optional, {len(missing_optional)}): " + ", ".join(missing_optional))
+        else:
+            print(
+                f"skipped {len(missing_optional)} optional/service-specific operations not enabled on this Prism Central "
+                "(use --print to list all)"
+            )
     if missing_required:
         raise SystemExit("missing required permissions: " + ", ".join(missing_required))
     if print_only:
@@ -572,7 +704,7 @@ def main():
     pc_tag = f"PC {pc_ver['raw']}" if pc_ver else "PC v4"
     # Note: Prism Central IAM v4 Role.description forbids ()+&%<>;"'`/\ characters
     role_desc = (
-        f"Permissions for NKP 2.19 CAPX, CCM, CAREN, IPAM, and CSI 3.9 on {pc_tag} "
+        f"NKP 2.19 master role for CAPX, CCM, CAREN, IPAM, CSI, Files, NIB, Flow, and DR on {pc_tag} "
         "with auto-resolved related operations."
     )
     body = {
