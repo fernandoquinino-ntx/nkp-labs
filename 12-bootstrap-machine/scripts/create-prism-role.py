@@ -117,10 +117,12 @@ def pages(prism, path):
         if status != 200:
             raise SystemExit(f"GET {path} failed ({status}): {json.dumps(payload)[:800]}")
         rows = payload.get("data") or []
+        if not isinstance(rows, list):
+            rows = [rows]
         yield from rows
-        total = (payload.get("metadata") or {}).get("totalAvailableResults", 0)
+        total = (payload.get("metadata") or {}).get("totalAvailableResults")
         page += 1
-        if page * 100 >= total or not rows:
+        if not rows or len(rows) < 100 or (total is not None and page * 100 >= total):
             return
 
 
@@ -199,8 +201,8 @@ def main():
         )
         if status not in (200, 202):
             raise SystemExit(f"update role failed ({status}): {json.dumps(payload)[:800]}")
+        # PUT returns a message, not the role. Keep the extId from the GET.
         print(f"updated role {role_name}")
-        role = (payload.get("data") or role)
 
     pc_user = None
     quoted = urllib.parse.quote(nkp_user)
