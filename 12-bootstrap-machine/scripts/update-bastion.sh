@@ -12,20 +12,15 @@ trap 'echo "ERROR: [update-bastion] failed at line $LINENO on command: $BASH_COM
 
 TARGET="${1:?usage: update-bastion.sh ubuntu@<bastion-ip>}"
 REPO="${NKP_LABS_GH_REPO:-fernandoquinino-ntx/nkp-labs}"
-BASE="https://github.com/${REPO}/releases/download/offline-bundle"
 WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
 
-echo "=== downloading the lab update ==="
-if ! curl -fL --retry 3 --retry-all-errors -o "${WORK}/update.tar.gz" "${BASE}/nkp-labs-update.tar.gz"; then
-  # Some release assets only answer on the API until the download CDN catches up.
-  asset="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/tags/offline-bundle" \
-    | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(a["url"] for a in d["assets"] if a["name"]=="nkp-labs-update.tar.gz"))')"
-  curl -fL -H "Accept: application/octet-stream" -o "${WORK}/update.tar.gz" "${asset}"
-fi
-tar -xzf "${WORK}/update.tar.gz" -C "${WORK}"
+echo "=== downloading latest ${REPO} main ==="
+curl -fL --retry 5 --retry-all-errors -o "${WORK}/src.tar.gz" \
+  "https://codeload.github.com/${REPO}/tar.gz/refs/heads/main"
+tar -xzf "${WORK}/src.tar.gz" -C "${WORK}"
 
-SRC="${WORK}/12-bootstrap-machine"
+SRC="$(echo "${WORK}"/nkp-labs-*/12-bootstrap-machine)"
 [ -d "${SRC}/scripts" ] || { echo "update archive has no scripts/" >&2; exit 1; }
 
 echo "=== copying lab files to ${TARGET}:~/nkp-workspace ==="
