@@ -83,16 +83,24 @@ fi
 chmod 644 "${STATE}/auth/htpasswd"
 "${htpasswd_bin}" -vb "${STATE}/auth/htpasswd" "${REG_USER}" "${REG_PASSWORD}" >/dev/null
 
-# Bastion Docker trusts this registry. Cluster nodes get the same CA via trust-registry.sh.
+# Bastion Docker trusts this registry (by both DNS name and IP). Cluster nodes get the same CA via trust-registry.sh.
 if [ -d /etc/docker ] && [ "$(id -u)" -eq 0 ]; then
   install -d -m 0755 "/etc/docker/certs.d/${HOST}:${PORT}"
   install -m 0644 "${STATE}/certs/ca.crt" "/etc/docker/certs.d/${HOST}:${PORT}/ca.crt"
+  if [ -n "${IP}" ] && [ "${IP}" != "${HOST}" ]; then
+    install -d -m 0755 "/etc/docker/certs.d/${IP}:${PORT}"
+    install -m 0644 "${STATE}/certs/ca.crt" "/etc/docker/certs.d/${IP}:${PORT}/ca.crt"
+  fi
 fi
 if [ -n "${IP}" ] && [ "$(id -u)" -eq 0 ] && ! getent hosts "${HOST}" >/dev/null 2>&1; then
   echo "${IP} ${HOST}" >> /etc/hosts
 fi
 install -d -m 0755 "${STATE}/docker-certs.d/${HOST}:${PORT}"
 install -m 0644 "${STATE}/certs/ca.crt" "${STATE}/docker-certs.d/${HOST}:${PORT}/ca.crt"
+if [ -n "${IP}" ] && [ "${IP}" != "${HOST}" ]; then
+  install -d -m 0755 "${STATE}/docker-certs.d/${IP}:${PORT}"
+  install -m 0644 "${STATE}/certs/ca.crt" "${STATE}/docker-certs.d/${IP}:${PORT}/ca.crt"
+fi
 
 if [ "${SKIP_DOCKER}" = "true" ]; then
   echo "=== certs ready in ${STATE} (docker start skipped) ==="

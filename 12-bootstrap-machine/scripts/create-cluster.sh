@@ -90,13 +90,25 @@ args=(
 if [ -n "${CLUSTER_HOSTNAME:-}" ]; then
   args+=(--cluster-hostname "${CLUSTER_HOSTNAME}")
 fi
-if [ -n "${BOOTSTRAP_CLUSTER_IMAGE_PATH:-}" ]; then
-  args+=(--bootstrap-cluster-image "${BOOTSTRAP_CLUSTER_IMAGE_PATH}")
+if [ -n "${EXTRA_SANS:-}" ]; then
+  args+=(--extra-sans "${EXTRA_SANS}")
 fi
+if [ -n "${CONTROL_PLANE_PC_CATEGORIES:-}" ]; then
+  args+=(--control-plane-pc-categories "${CONTROL_PLANE_PC_CATEGORIES}")
+fi
+if [ -n "${WORKER_PC_CATEGORIES:-}" ]; then
+  args+=(--worker-pc-categories "${WORKER_PC_CATEGORIES}")
+fi
+if [ "${AIRGAPPED:-false}" = "true" ]; then
+  args+=(--airgapped)
+fi
+
 # Air-gap: point the cluster at the bastion registry. Leave the URL empty or CHANGE-ME to skip.
+has_mirror=false
 case "${REGISTRY_MIRROR_URL:-}" in
   ""|*CHANGE-ME*) ;;
   *)
+    has_mirror=true
     case "${REGISTRY_MIRROR_PASSWORD:-}" in
       ""|*CHANGE-ME*) echo "set REGISTRY_MIRROR_PASSWORD from registry/credentials.env" >&2; exit 1 ;;
     esac
@@ -110,6 +122,34 @@ case "${REGISTRY_MIRROR_URL:-}" in
     fi
     ;;
 esac
+
+# Validate or auto-detect local bootstrap cluster image tarball for air-gapped installs.
+case "${BOOTSTRAP_CLUSTER_IMAGE_PATH:-}" in
+  http://*|https://*)
+    echo "BOOTSTRAP_CLUSTER_IMAGE_PATH must be a local .tar file (e.g. airgap/nkp-v2.19.1/konvoy-bootstrap-image-v2.19.1.tar), not a URL." >&2
+    echo "Put the registry URL in REGISTRY_MIRROR_URL instead." >&2
+    exit 1
+    ;;
+esac
+if [ -z "${BOOTSTRAP_CLUSTER_IMAGE_PATH:-}" ] && [ "${has_mirror}" = "true" ] && [ -d "${LAB}/airgap" ]; then
+  detected_bootstrap="$(find "${LAB}/airgap" -maxdepth 4 -type f -name 'konvoy-bootstrap-image-*.tar' 2>/dev/null | head -n 1 || true)"
+  if [ -z "${detected_bootstrap}" ]; then
+    detected_bootstrap="$(find "${LAB}/airgap" -maxdepth 4 -type f -iname '*bootstrap*.tar' 2>/dev/null | head -n 1 || true)"
+  fi
+  if [ -n "${detected_bootstrap}" ]; then
+    BOOTSTRAP_CLUSTER_IMAGE_PATH="${detected_bootstrap}"
+    echo "=== [create-cluster] auto-detected bootstrap image: ${BOOTSTRAP_CLUSTER_IMAGE_PATH} ==="
+  fi
+fi
+if [ -n "${BOOTSTRAP_CLUSTER_IMAGE_PATH:-}" ]; then
+  case "${BOOTSTRAP_CLUSTER_IMAGE_PATH}" in
+    /*|./*|../*|*.tar|*.tar.gz)
+      [ -f "${BOOTSTRAP_CLUSTER_IMAGE_PATH}" ] || { echo "BOOTSTRAP_CLUSTER_IMAGE_PATH file not found: ${BOOTSTRAP_CLUSTER_IMAGE_PATH}" >&2; exit 1; }
+      ;;
+  esac
+  args+=(--bootstrap-cluster-image "${BOOTSTRAP_CLUSTER_IMAGE_PATH}")
+fi
+
 if [ "${DRY_RUN}" = "true" ]; then
   args+=(--dry-run -o yaml)
 fi
@@ -145,37 +185,70 @@ add_bastion_host "${KOMMANDER_INGRESS_IP:-}" "${CLUSTER_HOSTNAME:-}"
 
 # Dex looks up CLUSTER_HOSTNAME while nkp create cluster is still installing
 # Kommander. The hosts entry has to land as soon as CoreDNS exists, not after
-# nkp returns. This watcher runs beside nkp.
+# nkp returns. This watcher runs beside nkp and retries on transient API errors.
+patch_coredns_once() {
+  local kc="$1" corefile
+  corefile="$(mktemp)"
+  if ! kubectl --kubeconfig "${kc}" -n kube-system get configmap coredns -o jsonpath='{.data.Corefile}' > "${corefile}" 2>/dev/null; then
+    rm -f "${corefile}"
+    return 1
+  fi
+  if [ ! -s "${corefile}" ]; then
+    rm -f "${corefile}"
+    return 1
+  fi
+  if ! python3 - "${corefile}" "${KOMMANDER_INGRESS_IP}" "${CLUSTER_HOSTNAME}" <<'PY'
+import pathlib, re, sys
+path, ip, name = sys.argv[1:]
+text = pathlib.Path(path).read_text()
+if re.search(rf'^\s*{re.escape(ip)}\s+{re.escape(name)}(\s|$)', text, re.M):
+    sys.exit(0)
+# If a hosts block already exists, insert our entry at the start of it; otherwise anchor before forward or closing brace.
+m_hosts = re.search(r'^([ \t]*)hosts\s*\{[^\n]*\n', text, re.M)
+if m_hosts:
+    indent = m_hosts.group(1) + "    "
+    insert_at = m_hosts.end()
+    text = text[:insert_at] + f"{indent}{ip} {name}\n" + text[insert_at:]
+else:
+    m_fwd = re.search(r'^([ \t]*)forward\b', text, re.M)
+    if m_fwd:
+        indent = m_fwd.group(1)
+        block = f"{indent}hosts {{\n{indent}    {ip} {name}\n{indent}    fallthrough\n{indent}}}\n"
+        text = text[:m_fwd.start()] + block + text[m_fwd.start():]
+    else:
+        m_end = re.search(r'^(\s*)\}\s*$', text, re.M)
+        if not m_end:
+            sys.exit("Corefile has no hosts, forward, or closing brace to anchor the hosts block")
+        indent = m_end.group(1) + "    "
+        block = f"{indent}hosts {{\n{indent}    {ip} {name}\n{indent}    fallthrough\n{indent}}}\n"
+        text = text[:m_end.start()] + block + text[m_end.start():]
+pathlib.Path(path).write_text(text)
+PY
+  then
+    rm -f "${corefile}"
+    return 1
+  fi
+  if ! (kubectl --kubeconfig "${kc}" -n kube-system create configmap coredns \
+      --from-file=Corefile="${corefile}" --dry-run=client -o yaml \
+      | kubectl --kubeconfig "${kc}" apply -f - >/dev/null 2>&1 \
+      && kubectl --kubeconfig "${kc}" -n kube-system rollout restart deployment coredns >/dev/null 2>&1); then
+    rm -f "${corefile}"
+    return 1
+  fi
+  rm -f "${corefile}"
+  return 0
+}
+
 apply_coredns_hosts() {
-  local kc="" candidate corefile
+  local kc="" candidate
   echo "=== waiting to add CoreDNS hosts: ${KOMMANDER_INGRESS_IP} ${CLUSTER_HOSTNAME} ==="
   for _ in $(seq 1 360); do
     kc=""
     for candidate in "${LAB}/${CLUSTER_NAME}.conf" "${LAB}/${CLUSTER_NAME}.kubeconfig" "${HOME}/${CLUSTER_NAME}.conf" "${LAB}/kubeconfig"; do
       [ -f "${candidate}" ] && kc="${candidate}" && break
     done
-    if [ -n "${kc}" ] && kubectl --kubeconfig "${kc}" -n kube-system get configmap coredns >/dev/null 2>&1; then
-      corefile="$(mktemp)"
-      kubectl --kubeconfig "${kc}" -n kube-system get configmap coredns -o jsonpath='{.data.Corefile}' > "${corefile}"
-      python3 - "${corefile}" "${KOMMANDER_INGRESS_IP}" "${CLUSTER_HOSTNAME}" <<'PY'
-import pathlib, sys
-path, ip, name = sys.argv[1:]
-text = pathlib.Path(path).read_text()
-line = f"    {ip} {name}"
-if line.strip() in text:
-    sys.exit(0)
-block = "    hosts {\n" + line + "\n        fallthrough\n    }\n"
-marker = "    forward "
-if marker not in text:
-    sys.exit("Corefile has no forward line to anchor the hosts block")
-pathlib.Path(path).write_text(text.replace(marker, block + marker, 1))
-PY
-      kubectl --kubeconfig "${kc}" -n kube-system create configmap coredns \
-        --from-file=Corefile="${corefile}" --dry-run=client -o yaml \
-        | kubectl --kubeconfig "${kc}" apply -f -
-      kubectl --kubeconfig "${kc}" -n kube-system rollout restart deployment coredns
-      rm -f "${corefile}"
-      echo "=== CoreDNS restarted with ${CLUSTER_HOSTNAME} before Kommander finishes ==="
+    if [ -n "${kc}" ] && patch_coredns_once "${kc}"; then
+      echo "=== CoreDNS restarted with ${CLUSTER_HOSTNAME} (${KOMMANDER_INGRESS_IP}) ==="
       return 0
     fi
     sleep 10
@@ -190,7 +263,21 @@ if [ "${DRY_RUN}" != "true" ] && [ -n "${KOMMANDER_INGRESS_IP:-}" ] && [ -n "${C
   dns_pid=$!
 fi
 
-echo "=== [create-cluster] nkp ${args[*]} ==="
+# Redact registry password when printing the command line.
+display_args=()
+mask_next=false
+for a in "${args[@]}"; do
+  if [ "${mask_next}" = "true" ]; then
+    display_args+=("***")
+    mask_next=false
+  elif [ "${a}" = "--registry-mirror-password" ]; then
+    display_args+=("${a}")
+    mask_next=true
+  else
+    display_args+=("${a}")
+  fi
+done
+echo "=== [create-cluster] nkp ${display_args[*]} ==="
 set +e
 nkp "${args[@]}"
 nkp_rc=$?

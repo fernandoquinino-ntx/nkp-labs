@@ -36,6 +36,8 @@ jobs:
           echo "name=$(basename dist/nkp-bootstrap-offline-*.tar.gz .tar.gz)" >> "$GITHUB_OUTPUT"
           git archive --format=tar.gz --output dist/nkp-labs-update.tar.gz HEAD 12-bootstrap-machine
           cp 12-bootstrap-machine/scripts/update-bastion.sh dist/update-bastion.sh
+          cp 12-bootstrap-machine/scripts/update-bastion.ps1 dist/update-bastion.ps1
+          cp 12-bootstrap-machine/scripts/create-prism-role.ps1 dist/create-prism-role.ps1
 
       - name: Install it in Ubuntu 24.04 with no network
         run: bash 12-bootstrap-machine/scripts/verify-offline-bundle.sh "dist/${{ steps.build.outputs.name }}.tar.gz"
@@ -65,4 +67,6 @@ jobs:
             "dist/${name}.tar.gz.sha256" \
             dist/cloud-init-offline.yaml \
             dist/nkp-labs-update.tar.gz \
-            dist/update-bastion.sh
+            dist/update-bastion.sh \
+            dist/update-bastion.ps1 \
+            dist/create-prism-role.ps1

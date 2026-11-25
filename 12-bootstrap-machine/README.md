@@ -65,8 +65,12 @@ Use one path for a given cluster name.
 | `create-cluster.env.example` | CLI path values. Copy to `create-cluster.env` (gitignored) |
 | `scripts/create-cluster.sh` | CLI path: `nkp create cluster nutanix --self-managed` |
 | `scripts/fetch-airgap-bundle.sh` | download the 2.19.1 air-gapped bundle (~33 GiB). Resumes, checks the size, writes `.complete`. Run by `nkp-airgap-download.service`. Log: `/var/log/nkp-bootstrap.log` |
-| `scripts/setup-local-registry.sh` | self-signed CA, registry certificate, `registry:2` on this host |
+| `scripts/setup-local-registry.sh` | self-signed CA, registry certificate, `registry:2` on this host (bcrypt auth + Docker CA trust by host and IP) |
 | `scripts/trust-registry.sh` | Opaque Secret `username` / `password` / `ca.crt` for CAREN |
+| `scripts/create-prism-role.ps1` | Windows PowerShell TUI: creates the NKP Prism Central IAM v4 role (with v4 version auto-detection) and assigns it to an existing user |
+| `scripts/create-prism-role.py` | Linux/macOS Python equivalent of `create-prism-role.ps1` |
+| `scripts/update-bastion.sh` | Linux/macOS: pushes latest lab files from `main` to an air-gapped bastion without touching local env/registry/airgap data |
+| `scripts/update-bastion.ps1` | Windows PowerShell equivalent of `update-bastion.sh` |
 | `helm-charts/nkp-cluster/` | `NKPCluster` plus Prism secrets |
 | `helm-charts/nkp-kommander/` | Kommander installer ConfigMap and the Docker Hub secret |
 
