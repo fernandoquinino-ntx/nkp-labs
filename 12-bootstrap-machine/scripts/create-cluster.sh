@@ -114,6 +114,35 @@ if [ "${DRY_RUN}" = "true" ]; then
   args+=(--dry-run -o yaml)
 fi
 
+# Bastion /etc/hosts: registry name -> mirror IP, and Kommander name -> ingress IP.
+add_bastion_host() {
+  local ip="$1" name="$2" tmp
+  [ -n "${ip}" ] && [ -n "${name}" ] || return 0
+  if grep -qE "^${ip}[[:space:]]+${name}([[:space:]]|$)" /etc/hosts; then
+    echo "hosts already has ${ip} ${name}"
+    return 0
+  fi
+  tmp="$(mktemp)"
+  grep -vE "(^|[[:space:]])${name}([[:space:]]|$)" /etc/hosts > "${tmp}" || true
+  echo "${ip} ${name}" >> "${tmp}"
+  if [ "$(id -u)" -eq 0 ]; then
+    cat "${tmp}" > /etc/hosts
+  else
+    sudo cp "${tmp}" /etc/hosts
+  fi
+  rm -f "${tmp}"
+  echo "hosts: ${ip} ${name}"
+}
+reg_ip="${REGISTRY_MIRROR_URL:-}"
+reg_ip="${reg_ip#*://}"
+reg_ip="${reg_ip%%/*}"
+reg_ip="${reg_ip%%:*}"
+case "${reg_ip}" in
+  ""|*[!0-9.]*) reg_ip="${REGISTRY_IP:-}" ;;
+esac
+add_bastion_host "${reg_ip}" "${REGISTRY_HOST:-registry.nkp.local}"
+add_bastion_host "${KOMMANDER_INGRESS_IP:-}" "${CLUSTER_HOSTNAME:-}"
+
 # Dex looks up CLUSTER_HOSTNAME while nkp create cluster is still installing
 # Kommander. The hosts entry has to land as soon as CoreDNS exists, not after
 # nkp returns. This watcher runs beside nkp.
