@@ -114,27 +114,21 @@ if [ "${DRY_RUN}" = "true" ]; then
   args+=(--dry-run -o yaml)
 fi
 
-echo "=== [create-cluster] nkp ${args[*]} ==="
-nkp "${args[@]}"
-
-# nkp create cluster records the Kommander name. It does not publish DNS.
-# Add the name to CoreDNS in this same run, once the API answers.
-if [ "${DRY_RUN}" != "true" ] && [ -n "${KOMMANDER_INGRESS_IP:-}" ] && [ -n "${CLUSTER_HOSTNAME:-}" ]; then
-  kc=""
-  for candidate in "${LAB}/${CLUSTER_NAME}.conf" "${HOME}/${CLUSTER_NAME}.conf" "${LAB}/kubeconfig"; do
-    [ -f "${candidate}" ] && kc="${candidate}" && break
-  done
-  [ -n "${kc}" ] || { echo "kubeconfig not found. CoreDNS hosts not applied." >&2; exit 1; }
-  echo "=== CoreDNS hosts: ${KOMMANDER_INGRESS_IP} ${CLUSTER_HOSTNAME} ==="
-  ready=0
-  for _ in $(seq 1 60); do
-    kubectl --kubeconfig "${kc}" -n kube-system get configmap coredns >/dev/null 2>&1 && ready=1 && break
-    sleep 10
-  done
-  [ "${ready}" = 1 ] || { echo "coredns ConfigMap did not appear" >&2; exit 1; }
-  corefile="$(mktemp)"
-  kubectl --kubeconfig "${kc}" -n kube-system get configmap coredns -o jsonpath='{.data.Corefile}' > "${corefile}"
-  python3 - "${corefile}" "${KOMMANDER_INGRESS_IP}" "${CLUSTER_HOSTNAME}" <<'PY'
+# Dex looks up CLUSTER_HOSTNAME while nkp create cluster is still installing
+# Kommander. The hosts entry has to land as soon as CoreDNS exists, not after
+# nkp returns. This watcher runs beside nkp.
+apply_coredns_hosts() {
+  local kc="" candidate corefile
+  echo "=== waiting to add CoreDNS hosts: ${KOMMANDER_INGRESS_IP} ${CLUSTER_HOSTNAME} ==="
+  for _ in $(seq 1 360); do
+    kc=""
+    for candidate in "${LAB}/${CLUSTER_NAME}.conf" "${LAB}/${CLUSTER_NAME}.kubeconfig" "${HOME}/${CLUSTER_NAME}.conf" "${LAB}/kubeconfig"; do
+      [ -f "${candidate}" ] && kc="${candidate}" && break
+    done
+    if [ -n "${kc}" ] && kubectl --kubeconfig "${kc}" -n kube-system get configmap coredns >/dev/null 2>&1; then
+      corefile="$(mktemp)"
+      kubectl --kubeconfig "${kc}" -n kube-system get configmap coredns -o jsonpath='{.data.Corefile}' > "${corefile}"
+      python3 - "${corefile}" "${KOMMANDER_INGRESS_IP}" "${CLUSTER_HOSTNAME}" <<'PY'
 import pathlib, sys
 path, ip, name = sys.argv[1:]
 text = pathlib.Path(path).read_text()
@@ -147,10 +141,37 @@ if marker not in text:
     sys.exit("Corefile has no forward line to anchor the hosts block")
 pathlib.Path(path).write_text(text.replace(marker, block + marker, 1))
 PY
-  kubectl --kubeconfig "${kc}" -n kube-system create configmap coredns \
-    --from-file=Corefile="${corefile}" --dry-run=client -o yaml \
-    | kubectl --kubeconfig "${kc}" apply -f -
-  kubectl --kubeconfig "${kc}" -n kube-system rollout restart deployment coredns
-  rm -f "${corefile}"
-  echo "=== CoreDNS restarted with ${CLUSTER_HOSTNAME} ==="
+      kubectl --kubeconfig "${kc}" -n kube-system create configmap coredns \
+        --from-file=Corefile="${corefile}" --dry-run=client -o yaml \
+        | kubectl --kubeconfig "${kc}" apply -f -
+      kubectl --kubeconfig "${kc}" -n kube-system rollout restart deployment coredns
+      rm -f "${corefile}"
+      echo "=== CoreDNS restarted with ${CLUSTER_HOSTNAME} before Kommander finishes ==="
+      return 0
+    fi
+    sleep 10
+  done
+  echo "coredns ConfigMap did not appear in time for Dex" >&2
+  return 1
+}
+
+dns_pid=""
+if [ "${DRY_RUN}" != "true" ] && [ -n "${KOMMANDER_INGRESS_IP:-}" ] && [ -n "${CLUSTER_HOSTNAME:-}" ]; then
+  apply_coredns_hosts &
+  dns_pid=$!
 fi
+
+echo "=== [create-cluster] nkp ${args[*]} ==="
+set +e
+nkp "${args[@]}"
+nkp_rc=$?
+set -e
+if [ -n "${dns_pid}" ]; then
+  if [ "${nkp_rc}" -ne 0 ]; then
+    kill "${dns_pid}" 2>/dev/null || true
+    wait "${dns_pid}" 2>/dev/null || true
+  else
+    wait "${dns_pid}"
+  fi
+fi
+exit "${nkp_rc}"
