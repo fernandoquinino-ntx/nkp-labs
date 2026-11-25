@@ -46,6 +46,7 @@ PERMISSIONS = [
     ("View Role", ""),
     ("View Entity", ""),
     ("View Operation", ""),
+    ("View Permission", ""),
     ("View Domain Manager", "7.5"),
     ("View Domain Manager Product", ""),
     ("View Domain Manager Registration", ""),
@@ -129,9 +130,11 @@ PERMISSIONS = [
     ("Deploy Ova", ""),
     ("Download Ova", ""),
     ("View VM Templates", ""),
+    ("View VM Templates Versions", ""),
     ("Create VM Templates", ""),
     ("Deploy VM Templates", ""),
     ("View VM Anti Affinity Policy", ""),
+    ("View Legacy VM Anti Affinity Policy", ""),
     ("Create VM Anti Affinity Policy", ""),
     ("Update VM Anti Affinity Policy", ""),
     ("Delete VM Anti Affinity Policy", ""),
@@ -207,6 +210,7 @@ PERMISSIONS = [
     ("View VPC", ""),
     ("Update VPC", ""),
     ("View VPC Route Table", ""),
+    ("View Vpc Virtual Switch Mapping", ""),
     ("View Route Table Route", ""),
     ("View Virtual Switch", ""),
     ("View Nic Profile", ""),
@@ -259,6 +263,7 @@ PERMISSIONS = [
     ("Attach Volume Group To AHV VM", ""),
     ("Detach Volume Group From AHV VM", "all"),
     ("View Volume Group VM Attachments", ""),
+    ("Update Connections with Direct-attach AHV VMs", ""),
     ("Attach Volume Group To External ISCSI Client", ""),
     ("Detach Volume Group From External ISCSI Client", ""),
     ("Attach Volume Group To External NVMF Client", ""),
@@ -320,6 +325,10 @@ PERMISSIONS = [
     ("Create Recovery Plan Config", ""),
     ("Update Recovery Plan Config", ""),
     ("Delete Recovery Plan Config", ""),
+    ("View Recovery Plan Settings", ""),
+    ("View Recovery Plan Stage", ""),
+    ("View Recovery Plan Network Mapping", ""),
+    ("View Recovery Plan Data Services Ip Mapping", ""),
     ("View Recovery Plan Job Config", ""),
     ("View Recovery Plan Job Execution Steps", ""),
     ("View Recovery Plan Job Validation Errors", ""),
@@ -593,12 +602,61 @@ def select_operations(prism, iam_base, operations, pc_ver):
         if not any(norm(a) in by_name for a in alts) and grp_name not in missing_required:
             missing_required.append(grp_name)
 
-    # Recursively expand relatedOperationList (predecessor/dependent operations)
+    # Correlated View safeguard + recursive relatedOperationList expansion:
+    # 1) For every selected write/lifecycle operation, ensure any matching assignable
+    #    "View <Resource>" / "View Existing <Resource>" operation on PC is included.
+    # 2) Recursively resolve relatedOperationList (matching Prism Central UI's
+    #    "Automatically add related operations" toggle), falling back to per-item
+    #    GET /authz/operations/{extId} if the list endpoint omitted relatedOperationList.
     queue = deque(direct)
     related = []
+
+    list_has_related = any(bool(row.get("relatedOperationList")) for row in operations)
+    correlated_verbs = (
+        "create new ", "delete existing ", "clone existing ", "revert existing ",
+        "create or update ", "power on ", "power off ", "power cycle ",
+        "acpi shutdown ", "acpi reboot ", "guest shutdown ", "guest reboot ",
+        "planned failover ", "unplanned failover ", "test failover ",
+        "resume protection ", "cleanup resources ", "set expiration time ",
+        "create ", "delete ", "update ", "clone ", "deploy ", "attach ", "detach ",
+        "restore ", "replicate ", "reserve ", "unreserve ", "share ", "unshare ",
+        "assign ", "associate ", "disassociate ", "reset ", "eject ", "insert ",
+        "migrate ", "download ", "cancel ", "revert ", "promote ", "sync ", "validate ",
+    )
+    for row in list(direct):
+        op_label = str(row.get("displayName") or row.get("name") or "").strip()
+        op_low = op_label.lower()
+        if not op_label or op_low.startswith("view "):
+            continue
+        suffix = None
+        for verb in correlated_verbs:
+            if op_low.startswith(verb):
+                suffix = op_label[len(verb):].strip()
+                break
+        if not suffix:
+            continue
+        for cand in (f"View {suffix}", f"View Existing {suffix}"):
+            ck = norm(cand)
+            if ck in by_name:
+                for v_row in by_name[ck]:
+                    vid = v_row.get("extId")
+                    if vid and vid not in selected_by_id:
+                        selected_by_id[vid] = v_row
+                        related.append(v_row)
+                        queue.append(v_row)
+
+    detail_fetched = set()
     while queue:
         cur = queue.popleft()
-        for rel_id in cur.get("relatedOperationList") or []:
+        cur_id = cur.get("extId") or ""
+        rel_list = cur.get("relatedOperationList")
+        if not rel_list and not list_has_related and cur_id and cur_id not in detail_fetched:
+            detail_fetched.add(cur_id)
+            st, _, payload = prism.call("GET", f"{iam_base}/authz/operations/{cur_id}")
+            if st == 200 and isinstance(payload, dict) and isinstance(payload.get("data"), dict):
+                rel_list = payload["data"].get("relatedOperationList")
+        for rel_raw in rel_list or []:
+            rel_id = rel_raw.get("extId") if isinstance(rel_raw, dict) else rel_raw
             if not rel_id or rel_id in selected_by_id:
                 continue
             rel_row = None
@@ -608,6 +666,7 @@ def select_operations(prism, iam_base, operations, pc_ver):
                 st, _, payload = prism.call("GET", f"{iam_base}/authz/operations/{rel_id}")
                 if st == 200 and isinstance(payload, dict) and isinstance(payload.get("data"), dict):
                     rel_row = payload["data"]
+                    detail_fetched.add(rel_id)
             if rel_row is not None:
                 if not is_assignable_operation(rel_row):
                     continue

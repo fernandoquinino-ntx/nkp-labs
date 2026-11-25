@@ -147,6 +147,7 @@ $permissions = @(
     @{ Name = "View Role";                                   MinPc = "" },
     @{ Name = "View Entity";                                 MinPc = "" },
     @{ Name = "View Operation";                              MinPc = "" },
+    @{ Name = "View Permission";                             MinPc = "" },
     @{ Name = "View Domain Manager";                         MinPc = "7.5" },
     @{ Name = "View Domain Manager Product";                 MinPc = "" },
     @{ Name = "View Domain Manager Registration";            MinPc = "" },
@@ -231,9 +232,11 @@ $permissions = @(
     @{ Name = "Deploy Ova";                                  MinPc = "" },
     @{ Name = "Download Ova";                                MinPc = "" },
     @{ Name = "View VM Templates";                           MinPc = "" },
+    @{ Name = "View VM Templates Versions";                  MinPc = "" },
     @{ Name = "Create VM Templates";                         MinPc = "" },
     @{ Name = "Deploy VM Templates";                         MinPc = "" },
     @{ Name = "View VM Anti Affinity Policy";                MinPc = "" },
+    @{ Name = "View Legacy VM Anti Affinity Policy";         MinPc = "" },
     @{ Name = "Create VM Anti Affinity Policy";              MinPc = "" },
     @{ Name = "Update VM Anti Affinity Policy";              MinPc = "" },
     @{ Name = "Delete VM Anti Affinity Policy";              MinPc = "" },
@@ -312,6 +315,7 @@ $permissions = @(
     @{ Name = "View VPC";                                    MinPc = "" },
     @{ Name = "Update VPC";                                  MinPc = "" },
     @{ Name = "View VPC Route Table";                        MinPc = "" },
+    @{ Name = "View Vpc Virtual Switch Mapping";             MinPc = "" },
     @{ Name = "View Route Table Route";                      MinPc = "" },
     @{ Name = "View Virtual Switch";                         MinPc = "" },
     @{ Name = "View Nic Profile";                            MinPc = "" },
@@ -366,6 +370,7 @@ $permissions = @(
     @{ Name = "Attach Volume Group To AHV VM";               MinPc = "" },
     @{ Name = "Detach Volume Group From AHV VM";             MinPc = "all" },
     @{ Name = "View Volume Group VM Attachments";            MinPc = "" },
+    @{ Name = "Update Connections with Direct-attach AHV VMs"; MinPc = "" },
     @{ Name = "Attach Volume Group To External ISCSI Client"; MinPc = "" },
     @{ Name = "Detach Volume Group From External ISCSI Client"; MinPc = "" },
     @{ Name = "Attach Volume Group To External NVMF Client"; MinPc = "" },
@@ -430,6 +435,10 @@ $permissions = @(
     @{ Name = "Create Recovery Plan Config";                 MinPc = "" },
     @{ Name = "Update Recovery Plan Config";                 MinPc = "" },
     @{ Name = "Delete Recovery Plan Config";                 MinPc = "" },
+    @{ Name = "View Recovery Plan Settings";                 MinPc = "" },
+    @{ Name = "View Recovery Plan Stage";                    MinPc = "" },
+    @{ Name = "View Recovery Plan Network Mapping";          MinPc = "" },
+    @{ Name = "View Recovery Plan Data Services Ip Mapping"; MinPc = "" },
     @{ Name = "View Recovery Plan Job Config";               MinPc = "" },
     @{ Name = "View Recovery Plan Job Execution Steps";      MinPc = "" },
     @{ Name = "View Recovery Plan Job Validation Errors";    MinPc = "" },
@@ -767,17 +776,86 @@ foreach ($grp in $requiredGroups) {
     }
 }
 
-# Recursively resolve predecessor / related operations (relatedOperationList) just like Prism Central UI does
+# Correlated View safeguard + recursive relatedOperationList expansion:
+# 1) For every selected write/lifecycle operation (Create/Update/Delete/Clone/Deploy/Power/Attach/etc.),
+#    ensure any matching assignable "View <Resource>" / "View Existing <Resource>" operation on PC
+#    is also included (belt-and-suspenders alongside explicit entries & relatedOperationList).
+# 2) Recursively resolve relatedOperationList (the exact graph Prism Central UI uses when
+#    "Automatically add related operations" is enabled). If the list endpoint omitted
+#    relatedOperationList across all operations, fetch individual operation details automatically.
 $queue = New-Object System.Collections.Generic.Queue[object]
 foreach ($row in $directList) { $queue.Enqueue($row) }
 $resolvedRelated = @()
+
+$listHasRelated = $false
+foreach ($opRow in $operations) {
+    if ($opRow -and $opRow.PSObject.Properties['relatedOperationList'] -and @($opRow.relatedOperationList).Count -gt 0) {
+        $listHasRelated = $true
+        break
+    }
+}
+
+$correlatedVerbs = @(
+    "Create New ", "Delete Existing ", "Clone Existing ", "Revert Existing ",
+    "Create Or Update ", "Power On ", "Power Off ", "Power Cycle ",
+    "ACPI Shutdown ", "ACPI Reboot ", "Guest Shutdown ", "Guest Reboot ",
+    "Planned Failover ", "Unplanned Failover ", "Test Failover ",
+    "Resume Protection ", "Cleanup Resources ", "Set Expiration Time ",
+    "Create ", "Delete ", "Update ", "Clone ", "Deploy ", "Attach ", "Detach ",
+    "Restore ", "Replicate ", "Reserve ", "Unreserve ", "Share ", "Unshare ",
+    "Assign ", "Associate ", "Disassociate ", "Reset ", "Eject ", "Insert ",
+    "Migrate ", "Download ", "Cancel ", "Revert ", "Promote ", "Sync ", "Validate "
+)
+foreach ($row in @($directList)) {
+    $opLabel = if ($row.displayName) { [string]$row.displayName } else { [string]$row.name }
+    if (-not $opLabel -or $opLabel -match '^(?i)View\s+') { continue }
+    $suffix = $null
+    foreach ($verb in $correlatedVerbs) {
+        if ($opLabel.StartsWith($verb, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $suffix = $opLabel.Substring($verb.Length).Trim()
+            break
+        }
+    }
+    if (-not $suffix) { continue }
+    foreach ($cand in @("View $suffix", "View Existing $suffix")) {
+        $ck = ConvertTo-Norm $cand
+        if ($byName.ContainsKey($ck)) {
+            foreach ($vRow in $byName[$ck]) {
+                $vid = [string]$vRow.extId
+                if ($vid -and -not $selectedById.ContainsKey($vid)) {
+                    $selectedById[$vid] = $vRow
+                    $resolvedRelated += $vRow
+                    $queue.Enqueue($vRow)
+                }
+            }
+        }
+    }
+}
+
+$detailFetched = @{}
 while ($queue.Count -gt 0) {
     $cur = $queue.Dequeue()
-    if (-not $cur -or -not $cur.PSObject.Properties['relatedOperationList'] -or -not $cur.relatedOperationList) {
-        continue
+    if (-not $cur) { continue }
+    $curId = if ($cur.PSObject.Properties['extId'] -and $cur.extId) { [string]$cur.extId } else { "" }
+    $relList = $null
+    if ($cur.PSObject.Properties['relatedOperationList'] -and $cur.relatedOperationList) {
+        $relList = @($cur.relatedOperationList)
+    } elseif (-not $listHasRelated -and $curId -and -not $detailFetched.ContainsKey($curId)) {
+        $detailFetched[$curId] = $true
+        $det = Invoke-Prism GET "$iamBase/authz/operations/$curId" $null $null $null
+        if ($det.Status -eq 200 -and $det.Body -and $det.Body.data -and $det.Body.data.PSObject.Properties['relatedOperationList'] -and $det.Body.data.relatedOperationList) {
+            $relList = @($det.Body.data.relatedOperationList)
+        }
     }
-    foreach ($relIdRaw in @($cur.relatedOperationList)) {
-        $relId = [string]$relIdRaw
+    if (-not $relList -or $relList.Count -eq 0) { continue }
+    foreach ($relIdRaw in $relList) {
+        $relId = if ($relIdRaw -is [string]) {
+            $relIdRaw
+        } elseif ($relIdRaw -and $relIdRaw.PSObject.Properties['extId'] -and $relIdRaw.extId) {
+            [string]$relIdRaw.extId
+        } else {
+            [string]$relIdRaw
+        }
         if (-not $relId -or $selectedById.ContainsKey($relId)) { continue }
         $relRow = $null
         if ($byId.ContainsKey($relId)) {
@@ -786,6 +864,7 @@ while ($queue.Count -gt 0) {
             $fetched = Invoke-Prism GET "$iamBase/authz/operations/$relId" $null $null $null
             if ($fetched.Status -eq 200 -and $fetched.Body -and $fetched.Body.data) {
                 $relRow = $fetched.Body.data
+                $detailFetched[$relId] = $true
             }
         }
         if ($relRow) {
