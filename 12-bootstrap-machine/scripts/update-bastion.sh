@@ -3,7 +3,7 @@
 # Run this on a machine that does. Your env, values.local.yaml, create-cluster.env,
 # kubeconfigs, registry/ and airgap/ on the bastion are not touched.
 #
-#   curl -fsSL -o update-bastion.sh https://github.com/fernandoquinino-ntx/nkp-labs/releases/download/offline-bundle/update-bastion.sh
+#   curl -fsSL -o update-bastion.sh https://raw.githubusercontent.com/fernandoquinino-ntx/nkp-labs/main/12-bootstrap-machine/scripts/update-bastion.sh
 #   bash update-bastion.sh ubuntu@<bastion-ip>
 #
 # No GitHub login. The bastion password is asked once.
@@ -16,8 +16,13 @@ BASE="https://github.com/${REPO}/releases/download/offline-bundle"
 WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
 
-echo "=== downloading ${BASE}/nkp-labs-update.tar.gz ==="
-curl -fL --retry 5 --retry-all-errors -o "${WORK}/update.tar.gz" "${BASE}/nkp-labs-update.tar.gz"
+echo "=== downloading the lab update ==="
+if ! curl -fL --retry 3 --retry-all-errors -o "${WORK}/update.tar.gz" "${BASE}/nkp-labs-update.tar.gz"; then
+  # Some release assets only answer on the API until the download CDN catches up.
+  asset="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/tags/offline-bundle" \
+    | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(a["url"] for a in d["assets"] if a["name"]=="nkp-labs-update.tar.gz"))')"
+  curl -fL -H "Accept: application/octet-stream" -o "${WORK}/update.tar.gz" "${asset}"
+fi
 tar -xzf "${WORK}/update.tar.gz" -C "${WORK}"
 
 SRC="${WORK}/12-bootstrap-machine"
