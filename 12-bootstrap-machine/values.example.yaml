@@ -8,6 +8,16 @@
 mode: management
 airgapped: false
 
+localRegistry:
+  enabled: false
+  host: registry.nkp.local
+  ip: ""
+  port: 5000
+  username: nkp
+  password: ""
+  secretName: nkp-registry-credentials
+  caCrt: ""
+
 # --- identity ---------------------------------------------------------------
 clusterName: nkp-mgmt
 namespace: kommander

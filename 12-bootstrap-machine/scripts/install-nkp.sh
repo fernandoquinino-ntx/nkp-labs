@@ -74,10 +74,35 @@ else
   fi
 
   echo "=== helm upgrade --install nkp-cluster ==="
-  helm upgrade --install nkp-cluster "${CHART}" \
-    -f "${CHART}/values.yaml" \
-    -f "${VALUES}" \
-    -n "${NAMESPACE}" --create-namespace
+  registry_values=""
+  if awk '/^localRegistry:/{s=1} s && /^[^ #]/{if($0 !~ /^localRegistry:/) s=0} s && $1=="enabled:" && $2=="true"{f=1} END{exit !f}' "${VALUES}"; then
+    creds="${WORKSPACE}/registry/credentials.env"
+    ca="${WORKSPACE}/registry/certs/ca.crt"
+    [ -f "${creds}" ] && [ -f "${ca}" ] || {
+      echo "localRegistry.enabled is true but ${creds} or ${ca} is missing." >&2
+      echo "Run: sudo REGISTRY_IP=<bastion-ip> ./scripts/setup-local-registry.sh" >&2
+      exit 1
+    }
+    # shellcheck disable=SC1090
+    . "${creds}"
+    [ -n "${REGISTRY_PASSWORD:-}" ] || { echo "REGISTRY_PASSWORD is empty in ${creds}" >&2; exit 1; }
+    registry_values="$(mktemp)"
+    {
+      echo "localRegistry:"
+      echo "  password: \"${REGISTRY_PASSWORD}\""
+      echo "  caCrt: |"
+      sed 's/^/    /' "${ca}"
+    } > "${registry_values}"
+    trap 'rm -f "${registry_values}"' EXIT
+    ip="$(awk '/^localRegistry:/{s=1} s && /^[^ #]/{if($0 !~ /^localRegistry:/) s=0} s && $1=="ip:"{gsub(/"/,"",$2); print $2; exit}' "${VALUES}")"
+    case "${ip}" in
+      ""|CHANGE-ME) echo "localRegistry.ip is empty. Set the bastion address on the node subnet." >&2; exit 1 ;;
+    esac
+  fi
+  helm_args=(upgrade --install nkp-cluster "${CHART}" -f "${CHART}/values.yaml" -f "${VALUES}")
+  [ -n "${registry_values}" ] && helm_args+=(-f "${registry_values}")
+  helm_args+=(-n "${NAMESPACE}" --create-namespace)
+  helm "${helm_args[@]}"
 
   echo "=== waiting for ${EXPECTED} machines to be Ready ==="
   ready=0

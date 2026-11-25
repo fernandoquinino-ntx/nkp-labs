@@ -6,6 +6,19 @@
 mode: management
 airgapped: true
 
+# Bastion registry. Set ip to the bastion address on VLAN 4031 (172.16.112.0/24).
+# password and caCrt stay empty here. install-nkp.sh reads registry/credentials.env
+# and registry/certs/ca.crt after setup-local-registry.sh.
+localRegistry:
+  enabled: true
+  host: registry.nkp.local
+  ip: "CHANGE-ME"
+  port: 5000
+  username: nkp
+  password: ""
+  secretName: nkp-registry-credentials
+  caCrt: ""
+
 clusterName: nkp-mgmt-prodtgu01
 namespace: kommander
 clusterDomain: bancodeoccidente.lan

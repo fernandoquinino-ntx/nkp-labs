@@ -8,6 +8,19 @@
 mode: management
 airgapped: false
 
+# Bastion registry for an air-gapped cluster. install-nkp.sh fills password and caCrt
+# from registry/credentials.env and registry/certs/ca.crt. ip is the bastion address
+# the NKP nodes can reach. The certificate must list that IP (setup-local-registry.sh REGISTRY_IP).
+localRegistry:
+  enabled: false
+  host: registry.nkp.local
+  ip: ""
+  port: 5000
+  username: nkp
+  password: ""
+  secretName: nkp-registry-credentials
+  caCrt: ""
+
 # --- identity ---------------------------------------------------------------
 clusterName: nkp-mgmt
 namespace: kommander

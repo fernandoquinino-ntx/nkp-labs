@@ -13,6 +13,15 @@ Helpers for nkp-cluster (management + managed).
 {{- if hasPrefix "v" $v -}}{{- printf "%s" $v -}}{{- else -}}{{- printf "v%s" $v -}}{{- end -}}
 {{- end -}}
 
+{{- define "nkp-cluster.registryURL" -}}
+{{- $port := .Values.localRegistry.port | default 5000 -}}
+{{- if .Values.localRegistry.ip -}}
+{{- printf "https://%s:%v" .Values.localRegistry.ip $port -}}
+{{- else -}}
+{{- printf "https://%s:%v" .Values.localRegistry.host $port -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "nkp-cluster.providerLabels" -}}
 cluster.x-k8s.io/provider: nutanix
 konvoy.d2iq.io/cluster-name: {{ .Values.clusterName }}

@@ -27,6 +27,18 @@ spec:
       variables:
       - name: clusterConfig
         value:
+          {{- if .Values.localRegistry.enabled }}
+          globalImageRegistryMirror:
+            url: {{ include "nkp-cluster.registryURL" . | quote }}
+            credentials:
+              secretRef:
+                name: {{ .Values.localRegistry.secretName }}
+          imageRegistries:
+            - url: {{ include "nkp-cluster.registryURL" . | quote }}
+              credentials:
+                secretRef:
+                  name: {{ .Values.localRegistry.secretName }}
+          {{- end }}
           addons:
             ccm:
               credentials:
