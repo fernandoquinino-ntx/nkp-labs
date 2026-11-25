@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """Create (or update) the Prism Central role NKP 2.19 needs, and assign it to an existing user.
 
-Covers NKP 2.19 + CAPX v1.9/v1.10 + CCM + Nutanix CSI 3.7/3.9 across Prism Central
-2024.x, pc.7.3, pc.7.5, and pc.7.6+:
+Source-code-verified coverage for NKP 2.19 (CAREN preflight + CAPX v1.10 + CCM + IPAM +
+Nutanix CSI 3.9) across Prism Central 2024.x, pc.7.3, pc.7.5, and pc.7.6+:
   - Auto-detects the Prism Central version (or honours PRISM_PC_VERSION).
-  - Matches BOTH legacy v3 and v4 operation names whenever present on the PC
-    (e.g. Create New Virtual Machine + Create Virtual Machine, Create Category +
-    Create Or Update Name Category, Create/Update Virtual Machine NIC, View Task,
-    CSI 3.9 Volume Group Disk/Categories/iSCSI operations).
+  - Matches BOTH legacy v3 and v4/pc.7.3+ renamed operation names whenever present on PC
+    (including View User for CAREN ValidateCredentials, View Domain Manager / Product,
+    View Container + View Storage Container, View Resource Group, View Cluster Host,
+    VM Profiles, GPU Profiles, Virtual Machine NIC/Disk/Categories, and CSI 3.9 ops).
   - Recursively resolves relatedOperationList (predecessor/dependent operations)
     just like the Prism Central UI does when saving a custom role.
+  - Updates the existing Authorization Policy in-place so role, user, and scope stay in sync.
+  - Optional live verification as the NKP user when NKP_PC_PASSWORD is set.
 
-Does not create the user and does not print the password.
+Does not create the user and does not print passwords.
 
   PRISM_ENDPOINT=https://10.0.0.1:9440 \
   PRISM_USER=admin \
@@ -38,7 +40,15 @@ IAM_VERSIONS = ["v4.0", "v4.1", "v4.1.b3", "v4.1.b2", "v4.1.b1", "v4.0.b1"]
 
 # (operation display name, min_pc_required: "" | "all" | "7.3" | "7.5")
 PERMISSIONS = [
-    # --- AHV VM (v4 + legacy v3) ---
+    # --- CAREN Preflight, IAM & Prism Central Domain Manager ---
+    ("View User", "7.5"),
+    ("View Domain Manager", "7.5"),
+    ("View Domain Manager Product", ""),
+    ("View Prism Central", ""),
+    ("View Task", "7.3"),
+    ("Fetch Task Response", ""),
+    ("View Availability Zone", ""),
+    # --- AHV VM & VM Profiles (v4 + legacy v3) ---
     ("Create New Virtual Machine", "7.3"),
     ("Create Virtual Machine", ""),
     ("Delete Existing Virtual Machine", "7.3"),
@@ -65,7 +75,7 @@ PERMISSIONS = [
     ("Create Virtual Machine NIC", "7.5"),
     ("Update Virtual Machine NIC", "7.5"),
     ("Delete Virtual Machine NIC", ""),
-    ("View Virtual Machine NIC", ""),
+    ("View Virtual Machine NIC", "7.5"),
     ("Assign Virtual Machine NIC IP", ""),
     ("Release Virtual Machine NIC IP", ""),
     ("Associate Virtual Machine Categories", ""),
@@ -78,11 +88,22 @@ PERMISSIONS = [
     ("Create Virtual Machine GPU", ""),
     ("Delete Virtual Machine GPU", ""),
     ("View Virtual Machine GPU", ""),
+    ("Create Virtual Machine PCIe Device", ""),
+    ("Delete Virtual Machine PCIe Device", ""),
+    ("View Virtual Machine PCIe Device", ""),
+    ("Create Virtual Machine Serial Port", ""),
+    ("Delete Virtual Machine Serial Port", ""),
+    ("Update Virtual Machine Serial Port", ""),
+    ("View Virtual Machine Serial Port", ""),
+    ("View Virtual Machine Profile", ""),
+    ("Deploy Virtual Machine From VM Profile", ""),
     # --- Categories (v4 for PC 7.3/7.5+ AND legacy v3) ---
     ("Create Category", "7.3"),
     ("Delete Category", "7.3"),
     ("Update Category", ""),
     ("View Category", "7.3"),
+    ("Share Category", ""),
+    ("Unshare Category", ""),
     ("Create Or Update Name Category", ""),
     ("Create Or Update Value Category", ""),
     ("Delete Name Category", ""),
@@ -93,27 +114,38 @@ PERMISSIONS = [
     ("Delete Category Mapping", ""),
     ("Update Category Mapping", ""),
     ("View Category Mapping", ""),
-    # --- Tasks & Prism Central ---
-    ("View Task", ""),
-    ("Fetch Task Response", ""),
-    ("View Prism Central", ""),
-    # --- Cluster, Host, Image, Project, Storage Container ---
+    # --- Cluster, Host, GPU Profiles, Storage Container, Project, Resource Group, Image ---
     ("View Cluster", "all"),
     ("View Host", "all"),
-    ("View Cluster Host", ""),
+    ("View Cluster Host", "7.5"),
     ("View Cluster Pgpu Profiles", ""),
     ("View Cluster Vgpu Profiles", ""),
+    ("View Physical Gpu Profile", ""),
+    ("View Virtual Gpu Profile", ""),
+    ("View Cluster Storage Config", ""),
+    ("View Disk", ""),
     ("Get Cluster Network Segment", ""),
+    ("View Container", ""),
+    ("View Container Stats", ""),
+    ("View Container Datastore", ""),
     ("View Storage Container", ""),
+    ("View Storage Container Stats", ""),
+    ("View Storage Container Datastore", ""),
+    ("View Storage Policy", ""),
     ("View Project", "all"),
+    ("View Resource Group", ""),
     ("View Resource Groups", ""),
     ("View Image", "all"),
     ("Create Image", ""),
     ("Delete Image", ""),
     ("Update Image", ""),
-    # --- Networking ---
+    ("View Content Repository Item", ""),
+    # --- Networking & IPAM ---
     ("View Subnet", "all"),
     ("View Overlay Subnet", ""),
+    ("View External Subnet", ""),
+    ("View Overlay External Subnet", ""),
+    ("View Remote Subnet", ""),
     ("View VPC", ""),
     ("Reserve Subnet Ip", ""),
     ("Unreserve Subnet Ip", ""),
@@ -123,19 +155,24 @@ PERMISSIONS = [
     ("Delete Volume Group", ""),
     ("Update Volume Group", ""),
     ("Update Volume Group Details", ""),
+    ("Revert Volume Group", ""),
     ("View Volume Group", ""),
     ("View Volume Group Details", ""),
     ("View Volume Group Metadata", ""),
+    ("View Volume Group Stats", ""),
     ("Create Volume Group Disk", ""),
     ("Delete Volume Group Disk", ""),
     ("Update Volume Group Disk", ""),
     ("Update Volume Group Virtual Disks", ""),
     ("View Volume Group Disks", ""),
+    ("View Volume Group Disk Stats", ""),
     ("Attach Volume Group To AHV VM", ""),
     ("Detach Volume Group From AHV VM", "all"),
     ("View Volume Group VM Attachments", ""),
     ("Attach Volume Group To External ISCSI Client", ""),
     ("Detach Volume Group From External ISCSI Client", ""),
+    ("Attach Volume Group To External NVMF Client", ""),
+    ("Detach Volume Group From External NVMF Client", ""),
     ("View External ISCSI Client", ""),
     ("Update External ISCSI Client", ""),
     ("View Volume Group ISCSI Attachments", ""),
@@ -143,15 +180,48 @@ PERMISSIONS = [
     ("Disassociate Volume Group Categories", ""),
     ("Update Volume Group Categories", ""),
     ("View Volume Group Category Associations", ""),
+    # --- Data Protection / Recovery Points (CSI snapshots & clones) ---
     ("Create Recovery Point", ""),
     ("Delete Recovery Point", ""),
     ("View Recovery Point", ""),
     ("Restore Recovery Point", ""),
+    ("Replicate Recovery Point", ""),
+    ("Set Expiration Time Recovery Point", ""),
+    ("Discover Cluster Recovery Point", ""),
+    ("View Data Protection Cluster Capabilities", ""),
+    ("View Recovery Point Store", ""),
+    ("View Virtual Machine Recovery Point", ""),
+    ("Compute Changed Regions Virtual Machine Recovery Point", ""),
+    ("Compute Changed Regions Volume Group Recovery Point", ""),
+    ("Create AHV VM Recovery Point", ""),
+    ("Delete AHV VM Recovery Point", ""),
+    ("Restore AHV VM Recovery Point", ""),
+    ("View AHV VM Recovery Point", ""),
+    # --- Metro / Disaster Recovery (optional, used by CAPX NutanixMetro / vHA) ---
+    ("View Protection Policy", ""),
+    ("Create Protection Policy", ""),
+    ("Update Protection Policy", ""),
+    ("Delete Protection Policy", ""),
+    ("View Recovery Plan", ""),
+    ("Create Recovery Plan", ""),
+    ("Update Recovery Plan", ""),
+    ("Delete Recovery Plan", ""),
+    ("View Recovery Plan Config", ""),
+    ("Create Recovery Plan Config", ""),
+    ("Update Recovery Plan Config", ""),
+    ("Delete Recovery Plan Config", ""),
 ]
 
 
 def norm(value):
     return " ".join(value.replace("_", " ").replace("-", " ").lower().split())
+
+
+def is_assignable_operation(row):
+    op_type = (row or {}).get("operationType")
+    if not op_type:
+        return True
+    return str(op_type).upper() == "EXTERNAL"
 
 
 def parse_pc_version(raw):
@@ -316,6 +386,7 @@ def detect_iam_version(prism, preferred=""):
 
 def pages(prism, path):
     page = 0
+    seen = 0
     while True:
         join = "&" if "?" in path else "?"
         status, _, payload = prism.call("GET", f"{path}{join}$page={page}&$limit=100")
@@ -325,9 +396,15 @@ def pages(prism, path):
         if not isinstance(rows, list):
             rows = [rows]
         yield from rows
+        seen += len(rows)
         total = (payload.get("metadata") or {}).get("totalAvailableResults")
         page += 1
-        if not rows or len(rows) < 100 or (total is not None and page * 100 >= total):
+        if not rows:
+            return
+        if total is not None:
+            if seen >= total:
+                return
+        elif len(rows) < 100:
             return
 
 
@@ -354,9 +431,14 @@ def select_operations(prism, iam_base, operations, pc_ver):
         oid = row.get("extId")
         if oid:
             by_id[oid] = row
-        label = operation_name(row)
-        if label:
-            by_name.setdefault(norm(label), []).append(row)
+        if not is_assignable_operation(row):
+            continue
+        for field in ("displayName", "name"):
+            label = row.get(field)
+            if label:
+                bucket = by_name.setdefault(norm(label), [])
+                if row not in bucket:
+                    bucket.append(row)
 
     selected_by_id = {}
     direct = []
@@ -380,6 +462,7 @@ def select_operations(prism, iam_base, operations, pc_ver):
         ("Create Virtual Machine", ("Create New Virtual Machine", "Create Virtual Machine")),
         ("Delete Virtual Machine", ("Delete Existing Virtual Machine", "Delete Virtual Machine")),
         ("View Virtual Machine", ("View Existing Virtual Machine", "View Virtual Machine")),
+        ("View Storage Container", ("View Container", "View Storage Container")),
     ):
         if not any(norm(a) in by_name for a in alts) and grp_name not in missing_required:
             missing_required.append(grp_name)
@@ -392,42 +475,48 @@ def select_operations(prism, iam_base, operations, pc_ver):
         for rel_id in cur.get("relatedOperationList") or []:
             if not rel_id or rel_id in selected_by_id:
                 continue
+            rel_row = None
             if rel_id in by_id:
                 rel_row = by_id[rel_id]
             else:
                 st, _, payload = prism.call("GET", f"{iam_base}/authz/operations/{rel_id}")
                 if st == 200 and isinstance(payload, dict) and isinstance(payload.get("data"), dict):
                     rel_row = payload["data"]
-                else:
-                    rel_row = {"extId": rel_id, "displayName": rel_id}
-            selected_by_id[rel_id] = rel_row
-            related.append(rel_row)
-            queue.append(rel_row)
+            if rel_row is not None:
+                if not is_assignable_operation(rel_row):
+                    continue
+                selected_by_id[rel_id] = rel_row
+                related.append(rel_row)
+                queue.append(rel_row)
+            else:
+                fallback = {"extId": rel_id, "displayName": rel_id}
+                selected_by_id[rel_id] = fallback
+                related.append(fallback)
 
     return selected_by_id, direct, related, missing_required, missing_optional
 
 
-def find_role(prism, iam_base, display_name):
-    for role in pages(prism, f"{iam_base}/authz/roles"):
-        if role.get("displayName") == display_name:
-            return role
+def find_by_name(prism, url_path, display_name):
+    for item in pages(prism, url_path):
+        if item.get("displayName") == display_name:
+            return item
     return None
 
 
-def update_role(prism, iam_base, role_id, body):
+def update_resource(prism, url_path, label, body):
     for attempt in range(1, 3):
-        status, headers, current = prism.call("GET", f"{iam_base}/authz/roles/{role_id}")
+        status, headers, current = prism.call("GET", url_path)
         if status != 200:
-            raise SystemExit(f"GET role {role_id} failed ({status}): {format_error(current)}")
+            raise SystemExit(f"GET {label} failed ({status}): {format_error(current)}")
         etag = extract_etag(headers, current)
         if not etag:
-            raise SystemExit(f"GET role {role_id} returned no ETag header or $reserved.Etag.")
-        status, _, payload = prism.call("PUT", f"{iam_base}/authz/roles/{role_id}", body, etag)
+            raise SystemExit(f"GET {label} returned no ETag header or $reserved.Etag.")
+        status, _, payload = prism.call("PUT", url_path, body, etag)
         if status in (200, 202):
             return
         if status == 412 and attempt < 2:
             continue
-        raise SystemExit(f"update role failed ({status}): {format_error(payload)}")
+        raise SystemExit(f"update {label} failed ({status}): {format_error(payload)}")
 
 
 def main():
@@ -436,6 +525,7 @@ def main():
     user = os.environ.get("PRISM_USER", "")
     password = os.environ.get("PRISM_PASSWORD", "")
     nkp_user = os.environ.get("NKP_PC_USER", "")
+    nkp_password = os.environ.get("NKP_PC_PASSWORD", "")
     role_name = os.environ.get("NKP_ROLE_NAME", "NKP Cluster Create")
     policy_name = os.environ.get("NKP_POLICY_NAME", role_name + " policy")
     iam_pref = os.environ.get("PRISM_IAM_VERSION", "")
@@ -461,7 +551,7 @@ def main():
     )
     print(
         f"matched {len(direct)} direct permissions + {len(related)} predecessor/related operations "
-        f"(total {len(selected_by_id)})"
+        f"(total {len(selected_by_id)} from {len(operations)} PC operations)"
     )
     if missing_optional:
         print("not on this Prism Central (optional): " + ", ".join(missing_optional))
@@ -478,11 +568,16 @@ def main():
         return
 
     operation_ids = list(selected_by_id.keys())
-    role = find_role(prism, iam_base, role_name)
+    role = find_by_name(prism, f"{iam_base}/authz/roles", role_name)
     pc_tag = f"PC {pc_ver['raw']}" if pc_ver else "PC v4"
+    # Note: Prism Central IAM v4 Role.description forbids ()+&%<>;"'`/\ characters
+    role_desc = (
+        f"Permissions for NKP 2.19 CAPX, CCM, CAREN, IPAM, and CSI 3.9 on {pc_tag} "
+        "with auto-resolved related operations."
+    )
     body = {
         "displayName": role_name,
-        "description": f"Permissions for NKP 2.19 (CAPX + CCM + CSI 3.9, {pc_tag}) with auto-resolved related operations.",
+        "description": role_desc,
         "operations": operation_ids,
     }
     if role is None:
@@ -491,17 +586,17 @@ def main():
             role = payload.get("data") or payload
             print(f"created role {role_name} ({len(operation_ids)} operations)")
         elif status == 409:
-            role = find_role(prism, iam_base, role_name)
+            role = find_by_name(prism, f"{iam_base}/authz/roles", role_name)
             if role is None:
                 raise SystemExit(
                     f"create role returned 409 conflict, but role {role_name} was not found: {format_error(payload)}"
                 )
-            update_role(prism, iam_base, role["extId"], body)
+            update_resource(prism, f"{iam_base}/authz/roles/{role['extId']}", f"role {role_name}", body)
             print(f"updated role {role_name} ({len(operation_ids)} operations, recovered from 409 conflict)")
         else:
             raise SystemExit(f"create role failed ({status}): {format_error(payload)}")
     else:
-        update_role(prism, iam_base, role["extId"], body)
+        update_resource(prism, f"{iam_base}/authz/roles/{role['extId']}", f"role {role_name}", body)
         print(f"updated role {role_name} ({len(operation_ids)} operations)")
 
     pc_user = None
@@ -522,17 +617,11 @@ def main():
     if pc_user is None:
         raise SystemExit(f"Prism Central user {nkp_user} does not exist. Create the user first.")
 
-    for policy in pages(prism, f"{iam_base}/authz/authorization-policies"):
-        if policy.get("displayName") == policy_name:
-            if policy.get("role") and policy.get("role") != role["extId"]:
-                print(
-                    f"WARNING: policy {policy_name} already exists but points to role "
-                    f"{policy.get('role')} instead of {role['extId']}",
-                    file=sys.stderr,
-                )
-            else:
-                print(f"policy {policy_name} already exists")
-            return
+    user_type = pc_user.get("userType") or "unknown"
+    user_status = pc_user.get("status") or "unknown"
+    print(f"Target user: {nkp_user} (type={user_type}, status={user_status}, extId={pc_user['extId']})")
+    if user_status != "unknown" and str(user_status).upper() != "ACTIVE":
+        print(f"WARNING: User {nkp_user} status is {user_status} (expected ACTIVE).", file=sys.stderr)
 
     policy_body = {
         "displayName": policy_name,
@@ -546,15 +635,61 @@ def main():
             {"$reserved": {"*": {"*": {"eq": "*"}}}}
         ],
     }
-    status, _, payload = prism.call(
-        "POST", f"{iam_base}/authz/authorization-policies", policy_body
-    )
-    if status in (200, 201, 202):
-        print(f"assigned {role_name} to {nkp_user}")
-    elif status == 409:
-        print(f"policy {policy_name} already exists (409)")
+
+    existing_policy = find_by_name(prism, f"{iam_base}/authz/authorization-policies", policy_name)
+    if existing_policy is not None:
+        update_resource(
+            prism,
+            f"{iam_base}/authz/authorization-policies/{existing_policy['extId']}",
+            f"policy {policy_name}",
+            policy_body,
+        )
+        print(f"updated policy {policy_name} (role={role_name}, user={nkp_user}, scope=all entities)")
     else:
-        raise SystemExit(f"create policy failed ({status}): {format_error(payload)}")
+        status, _, payload = prism.call(
+            "POST", f"{iam_base}/authz/authorization-policies", policy_body
+        )
+        if status in (200, 201, 202):
+            print(f"assigned {role_name} to {nkp_user} (policy={policy_name}, scope=all entities)")
+        elif status == 409:
+            existing_policy = find_by_name(prism, f"{iam_base}/authz/authorization-policies", policy_name)
+            if existing_policy is not None:
+                update_resource(
+                    prism,
+                    f"{iam_base}/authz/authorization-policies/{existing_policy['extId']}",
+                    f"policy {policy_name}",
+                    policy_body,
+                )
+                print(f"updated policy {policy_name} (recovered from 409 conflict)")
+            else:
+                print(f"policy {policy_name} already exists (409)")
+        else:
+            raise SystemExit(f"create policy failed ({status}): {format_error(payload)}")
+
+    if nkp_password:
+        print(f"\nVerifying NKP API access as {nkp_user} ...")
+        nkp_prism = Prism(endpoint, nkp_user, nkp_password, insecure)
+        checks = [
+            ("CAREN ValidateCredentials (View User)", f"{iam_base}/authn/users?$limit=1"),
+            ("CAREN/CAPX/CCM Version (View Domain Manager)", "/api/prism/v4.0/config/domain-managers"),
+            ("Clusters (View Cluster)", "/api/clustermgmt/v4.0/config/clusters?$limit=1"),
+            ("Storage Containers (View Container)", "/api/clustermgmt/v4.0/config/storage-containers?$limit=1"),
+            ("Images (View Image)", "/api/vmm/v4.0/content/images?$limit=1"),
+            ("Subnets (View Subnet)", "/api/networking/v4.0/config/subnets?$limit=1"),
+            ("AHV VMs (View Existing Virtual Machine)", "/api/vmm/v4.0/ahv/config/vms?$limit=1"),
+            ("Categories (View Category)", "/api/prism/v4.0/config/categories?$limit=1"),
+        ]
+        failed = 0
+        for label, path in checks:
+            st, _, pl = nkp_prism.call("GET", path)
+            if st == 200:
+                print(f"  [PASS 200] {label}")
+            else:
+                failed += 1
+                print(f"  [FAIL {st}] {label} -> {format_error(pl)}", file=sys.stderr)
+        if failed:
+            raise SystemExit(f"Verification failed for {failed} NKP API check(s) as {nkp_user}.")
+        print(f"All {len(checks)} NKP API permission checks passed as {nkp_user}.")
 
 
 if __name__ == "__main__":

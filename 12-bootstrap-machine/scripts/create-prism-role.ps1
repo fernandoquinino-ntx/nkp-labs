@@ -1,15 +1,16 @@
 # Ask for the Prism Central IP, the role name, and the NKP user, then create
-# (or update) that role with the full NKP 2.19 + CAPX + CSI 3.9 permissions
-# (including PC 7.3/7.5+ v4 operations and recursive relatedOperationList
-# predecessor resolution) and assign it. The user must already exist.
-# The admin password is not printed and is not saved.
+# (or update) that role with the full source-code-verified NKP 2.19 permissions
+# (CAREN preflight + CAPX v1.10 + CCM + IPAM + Nutanix CSI 3.9, including PC
+# 7.3/7.5+ renamed/v4 operations and recursive relatedOperationList predecessor
+# resolution) and create (or update) its Authorization Policy.
+# The user must already exist. Passwords are never printed or saved.
 #
 #   powershell -ExecutionPolicy Bypass -File .\create-prism-role.ps1
 #
 # Optional non-interactive parameters (prompted when omitted):
 #   -PrismIp <ip-or-url> -RoleName <name> -NkpUser <user>
 #   -AdminUser <admin> -AdminPassword <pass> -PcVersion <auto|7.5|7.3|2024.3>
-#   -ApiVersion <v4.0|v4.1.b3|...> -PrintOnly
+#   -ApiVersion <v4.0|v4.1.b3|...> -NkpPassword <pass> -PrintOnly
 #Requires -Version 5.1
 param(
     [string]$PrismIp,
@@ -19,6 +20,7 @@ param(
     [string]$AdminPassword,
     [string]$PcVersion,
     [string]$ApiVersion,
+    [string]$NkpPassword,
     [switch]$PrintOnly
 )
 
@@ -76,12 +78,19 @@ function Parse-PcVersion([string]$Raw) {
         $maj = [int]$Matches[1]
         $min = [int]$Matches[2]
         $pat = if ($Matches[3]) { [int]$Matches[3] } else { 0 }
-        return @{ Raw = $clean; Major = $maj; Minor = $min; Patch = $pat; IsPc73Plus = ($maj -ge 7 -and $maj -lt 2000 -and ($maj -gt 7 -or $min -ge 3)); IsPc75Plus = ($maj -ge 7 -and $maj -lt 2000 -and ($maj -gt 7 -or $min -ge 5)) }
+        return @{
+            Raw        = $clean
+            Major      = $maj
+            Minor      = $min
+            Patch      = $pat
+            IsPc73Plus = ($maj -ge 7 -and $maj -lt 2000 -and ($maj -gt 7 -or $min -ge 3))
+            IsPc75Plus = ($maj -ge 7 -and $maj -lt 2000 -and ($maj -gt 7 -or $min -ge 5))
+        }
     }
     return $null
 }
 
-Write-Host "Prism Central role for NKP 2.19 (CAPX + CCM + CSI)"
+Write-Host "Prism Central role for NKP 2.19 (CAREN + CAPX + CCM + IPAM + CSI 3.9)"
 $ip = if ($PrismIp) { $PrismIp.Trim() } else { Read-Required "Prism Central IP" }
 $roleName = if ($RoleName) { $RoleName.Trim() } else { Read-Required "Role name" "NKP Cluster Create" }
 if (-not $PrintOnly) {
@@ -104,14 +113,37 @@ $pair = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("${admin}:${adm
 $adminPass = $null
 $AdminPassword = $null
 
-# Permission matrix covering NKP 2.19 + CAPX v1.9/v1.10 + CCM + Nutanix CSI 3.7/3.9
-# across PC 2024.x, pc.7.3, pc.7.5, and pc.7.6+.
-# Unlike alias-only matching, EVERY listed operation name that exists on this Prism Central
-# is added (both legacy v3 and v4 operation names), and relatedOperationList predecessors
-# are resolved recursively below.
-# MinPc: "" = always optional, "all" = always required, "7.3" = required on PC 7.3+, "7.5" = required on PC 7.5+
+$nkpAuthPair = $null
+if ($NkpPassword -and $nkpUser) {
+    $nkpAuthPair = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("${nkpUser}:${NkpPassword}"))
+    $NkpPassword = $null
+}
+
+# Source-code-verified permission matrix covering:
+#   - CAREN preflight webhooks (ValidateCredentials -> Users.List, DomainManager.List/Products,
+#     Clusters, StorageContainers, Images, Subnets, AvailabilityZones)
+#   - CAPX v1.9/v1.10 (VMs, VMProfiles, GPUs, Categories, Projects, ResourceGroups, Tasks,
+#     VolumeGroups, ProtectionPolicies, RecoveryPlans)
+#   - CCM (DomainManager, Clusters, ClusterHost, Projects, ResourceGroups, Categories, VMs)
+#   - Nutanix IPAM provider (Subnets, Reserve/Unreserve Subnet IP)
+#   - Nutanix CSI 3.7/3.9 (Storage Containers / View Container, Volume Groups, Recovery Points)
+# across Prism Central 2024.x, pc.7.3, pc.7.5, and pc.7.6+.
+#
+# EVERY listed operation name that exists (and is EXTERNAL/assignable) on this Prism Central
+# is added (both legacy v3 and v4/pc.7.3+ renamed operation names), and relatedOperationList
+# predecessors are resolved recursively below.
+# MinPc: "" = optional, "all" = always required, "7.3" = required on PC 7.3+, "7.5" = required on PC 7.5+
 $permissions = @(
-    # --- AHV VM (v4 + legacy v3) ---
+    # --- CAREN Preflight, IAM & Prism Central Domain Manager ---
+    @{ Name = "View User";                                   MinPc = "7.5" },
+    @{ Name = "View Domain Manager";                         MinPc = "7.5" },
+    @{ Name = "View Domain Manager Product";                 MinPc = "" },
+    @{ Name = "View Prism Central";                          MinPc = "" },
+    @{ Name = "View Task";                                   MinPc = "7.3" },
+    @{ Name = "Fetch Task Response";                         MinPc = "" },
+    @{ Name = "View Availability Zone";                      MinPc = "" },
+
+    # --- AHV VM & VM Profiles (v4 + legacy v3) ---
     @{ Name = "Create New Virtual Machine";                  MinPc = "7.3" },
     @{ Name = "Create Virtual Machine";                      MinPc = "" },
     @{ Name = "Delete Existing Virtual Machine";             MinPc = "7.3" },
@@ -138,7 +170,7 @@ $permissions = @(
     @{ Name = "Create Virtual Machine NIC";                  MinPc = "7.5" },
     @{ Name = "Update Virtual Machine NIC";                  MinPc = "7.5" },
     @{ Name = "Delete Virtual Machine NIC";                  MinPc = "" },
-    @{ Name = "View Virtual Machine NIC";                    MinPc = "" },
+    @{ Name = "View Virtual Machine NIC";                    MinPc = "7.5" },
     @{ Name = "Assign Virtual Machine NIC IP";               MinPc = "" },
     @{ Name = "Release Virtual Machine NIC IP";              MinPc = "" },
     @{ Name = "Associate Virtual Machine Categories";        MinPc = "" },
@@ -151,12 +183,23 @@ $permissions = @(
     @{ Name = "Create Virtual Machine GPU";                  MinPc = "" },
     @{ Name = "Delete Virtual Machine GPU";                  MinPc = "" },
     @{ Name = "View Virtual Machine GPU";                    MinPc = "" },
+    @{ Name = "Create Virtual Machine PCIe Device";          MinPc = "" },
+    @{ Name = "Delete Virtual Machine PCIe Device";          MinPc = "" },
+    @{ Name = "View Virtual Machine PCIe Device";            MinPc = "" },
+    @{ Name = "Create Virtual Machine Serial Port";          MinPc = "" },
+    @{ Name = "Delete Virtual Machine Serial Port";          MinPc = "" },
+    @{ Name = "Update Virtual Machine Serial Port";          MinPc = "" },
+    @{ Name = "View Virtual Machine Serial Port";            MinPc = "" },
+    @{ Name = "View Virtual Machine Profile";                MinPc = "" },
+    @{ Name = "Deploy Virtual Machine From VM Profile";      MinPc = "" },
 
     # --- Categories (v4 for PC 7.3/7.5+ AND legacy v3) ---
     @{ Name = "Create Category";                             MinPc = "7.3" },
     @{ Name = "Delete Category";                             MinPc = "7.3" },
     @{ Name = "Update Category";                             MinPc = "" },
     @{ Name = "View Category";                               MinPc = "7.3" },
+    @{ Name = "Share Category";                              MinPc = "" },
+    @{ Name = "Unshare Category";                            MinPc = "" },
     @{ Name = "Create Or Update Name Category";              MinPc = "" },
     @{ Name = "Create Or Update Value Category";             MinPc = "" },
     @{ Name = "Delete Name Category";                        MinPc = "" },
@@ -168,29 +211,39 @@ $permissions = @(
     @{ Name = "Update Category Mapping";                     MinPc = "" },
     @{ Name = "View Category Mapping";                       MinPc = "" },
 
-    # --- Tasks & Prism Central ---
-    @{ Name = "View Task";                                   MinPc = "" },
-    @{ Name = "Fetch Task Response";                         MinPc = "" },
-    @{ Name = "View Prism Central";                          MinPc = "" },
-
-    # --- Cluster, Host, Image, Project, Storage Container ---
+    # --- Cluster, Host, GPU Profiles, Storage Container, Project, Resource Group, Image ---
     @{ Name = "View Cluster";                                MinPc = "all" },
     @{ Name = "View Host";                                   MinPc = "all" },
-    @{ Name = "View Cluster Host";                           MinPc = "" },
+    @{ Name = "View Cluster Host";                           MinPc = "7.5" },
     @{ Name = "View Cluster Pgpu Profiles";                  MinPc = "" },
     @{ Name = "View Cluster Vgpu Profiles";                  MinPc = "" },
+    @{ Name = "View Physical Gpu Profile";                   MinPc = "" },
+    @{ Name = "View Virtual Gpu Profile";                    MinPc = "" },
+    @{ Name = "View Cluster Storage Config";                 MinPc = "" },
+    @{ Name = "View Disk";                                   MinPc = "" },
     @{ Name = "Get Cluster Network Segment";                 MinPc = "" },
+    @{ Name = "View Container";                              MinPc = "" },
+    @{ Name = "View Container Stats";                        MinPc = "" },
+    @{ Name = "View Container Datastore";                    MinPc = "" },
     @{ Name = "View Storage Container";                      MinPc = "" },
+    @{ Name = "View Storage Container Stats";                MinPc = "" },
+    @{ Name = "View Storage Container Datastore";            MinPc = "" },
+    @{ Name = "View Storage Policy";                         MinPc = "" },
     @{ Name = "View Project";                                MinPc = "all" },
+    @{ Name = "View Resource Group";                         MinPc = "" },
     @{ Name = "View Resource Groups";                        MinPc = "" },
     @{ Name = "View Image";                                  MinPc = "all" },
     @{ Name = "Create Image";                                MinPc = "" },
     @{ Name = "Delete Image";                                MinPc = "" },
     @{ Name = "Update Image";                                MinPc = "" },
+    @{ Name = "View Content Repository Item";                MinPc = "" },
 
-    # --- Networking ---
+    # --- Networking & IPAM ---
     @{ Name = "View Subnet";                                 MinPc = "all" },
     @{ Name = "View Overlay Subnet";                         MinPc = "" },
+    @{ Name = "View External Subnet";                        MinPc = "" },
+    @{ Name = "View Overlay External Subnet";                MinPc = "" },
+    @{ Name = "View Remote Subnet";                          MinPc = "" },
     @{ Name = "View VPC";                                    MinPc = "" },
     @{ Name = "Reserve Subnet Ip";                           MinPc = "" },
     @{ Name = "Unreserve Subnet Ip";                         MinPc = "" },
@@ -201,19 +254,24 @@ $permissions = @(
     @{ Name = "Delete Volume Group";                         MinPc = "" },
     @{ Name = "Update Volume Group";                         MinPc = "" },
     @{ Name = "Update Volume Group Details";                 MinPc = "" },
+    @{ Name = "Revert Volume Group";                         MinPc = "" },
     @{ Name = "View Volume Group";                           MinPc = "" },
     @{ Name = "View Volume Group Details";                   MinPc = "" },
     @{ Name = "View Volume Group Metadata";                  MinPc = "" },
+    @{ Name = "View Volume Group Stats";                     MinPc = "" },
     @{ Name = "Create Volume Group Disk";                    MinPc = "" },
     @{ Name = "Delete Volume Group Disk";                    MinPc = "" },
     @{ Name = "Update Volume Group Disk";                    MinPc = "" },
     @{ Name = "Update Volume Group Virtual Disks";           MinPc = "" },
     @{ Name = "View Volume Group Disks";                     MinPc = "" },
+    @{ Name = "View Volume Group Disk Stats";                MinPc = "" },
     @{ Name = "Attach Volume Group To AHV VM";               MinPc = "" },
     @{ Name = "Detach Volume Group From AHV VM";             MinPc = "all" },
     @{ Name = "View Volume Group VM Attachments";            MinPc = "" },
     @{ Name = "Attach Volume Group To External ISCSI Client"; MinPc = "" },
     @{ Name = "Detach Volume Group From External ISCSI Client"; MinPc = "" },
+    @{ Name = "Attach Volume Group To External NVMF Client"; MinPc = "" },
+    @{ Name = "Detach Volume Group From External NVMF Client"; MinPc = "" },
     @{ Name = "View External ISCSI Client";                  MinPc = "" },
     @{ Name = "Update External ISCSI Client";                MinPc = "" },
     @{ Name = "View Volume Group ISCSI Attachments";         MinPc = "" },
@@ -221,14 +279,50 @@ $permissions = @(
     @{ Name = "Disassociate Volume Group Categories";        MinPc = "" },
     @{ Name = "Update Volume Group Categories";              MinPc = "" },
     @{ Name = "View Volume Group Category Associations";     MinPc = "" },
+
+    # --- Data Protection / Recovery Points (CSI snapshots & clones) ---
     @{ Name = "Create Recovery Point";                       MinPc = "" },
     @{ Name = "Delete Recovery Point";                       MinPc = "" },
     @{ Name = "View Recovery Point";                         MinPc = "" },
-    @{ Name = "Restore Recovery Point";                      MinPc = "" }
+    @{ Name = "Restore Recovery Point";                      MinPc = "" },
+    @{ Name = "Replicate Recovery Point";                    MinPc = "" },
+    @{ Name = "Set Expiration Time Recovery Point";          MinPc = "" },
+    @{ Name = "Discover Cluster Recovery Point";             MinPc = "" },
+    @{ Name = "View Data Protection Cluster Capabilities";   MinPc = "" },
+    @{ Name = "View Recovery Point Store";                   MinPc = "" },
+    @{ Name = "View Virtual Machine Recovery Point";         MinPc = "" },
+    @{ Name = "Compute Changed Regions Virtual Machine Recovery Point"; MinPc = "" },
+    @{ Name = "Compute Changed Regions Volume Group Recovery Point";    MinPc = "" },
+    @{ Name = "Create AHV VM Recovery Point";                MinPc = "" },
+    @{ Name = "Delete AHV VM Recovery Point";                MinPc = "" },
+    @{ Name = "Restore AHV VM Recovery Point";               MinPc = "" },
+    @{ Name = "View AHV VM Recovery Point";                  MinPc = "" },
+
+    # --- Metro / Disaster Recovery (optional, used by CAPX NutanixMetro / vHA) ---
+    @{ Name = "View Protection Policy";                      MinPc = "" },
+    @{ Name = "Create Protection Policy";                    MinPc = "" },
+    @{ Name = "Update Protection Policy";                    MinPc = "" },
+    @{ Name = "Delete Protection Policy";                    MinPc = "" },
+    @{ Name = "View Recovery Plan";                          MinPc = "" },
+    @{ Name = "Create Recovery Plan";                        MinPc = "" },
+    @{ Name = "Update Recovery Plan";                        MinPc = "" },
+    @{ Name = "Delete Recovery Plan";                        MinPc = "" },
+    @{ Name = "View Recovery Plan Config";                   MinPc = "" },
+    @{ Name = "Create Recovery Plan Config";                 MinPc = "" },
+    @{ Name = "Update Recovery Plan Config";                 MinPc = "" },
+    @{ Name = "Delete Recovery Plan Config";                 MinPc = "" }
 )
 
 function ConvertTo-Norm([string]$Value) {
     return (($Value -replace '[_-]', ' ') -replace '\s+', ' ').Trim().ToLower()
+}
+
+function Test-IsAssignableOperation($Row) {
+    if (-not $Row -or -not $Row.PSObject.Properties['operationType'] -or -not $Row.operationType) {
+        return $true
+    }
+    $t = ([string]$Row.operationType).ToUpper()
+    return ($t -eq "EXTERNAL")
 }
 
 function Format-PrismError($Body) {
@@ -274,7 +368,8 @@ function Get-PrismEtag($Result) {
     return $null
 }
 
-function Invoke-Prism([string]$Method, [string]$Path, $Body, [string]$Etag) {
+function Invoke-Prism([string]$Method, [string]$Path, $Body, [string]$Etag, [string]$AuthPair) {
+    $auth = if ($AuthPair) { $AuthPair } else { $pair }
     $requestId = [guid]::NewGuid().ToString()
     $maxAttempts = 3
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
@@ -284,9 +379,15 @@ function Invoke-Prism([string]$Method, [string]$Path, $Body, [string]$Etag) {
         $headers = @{
             Accept            = "application/json"
             "Ntnx-Request-Id" = $requestId
-            Authorization     = "Basic $pair"
+            Authorization     = "Basic $auth"
         }
-        if ($Etag) { $headers["If-Match"] = $Etag }
+        if ($Etag) {
+            $ifMatch = $Etag.Trim()
+            if ($PSVersionTable.PSVersion.Major -ge 6 -and $ifMatch -ne '*' -and -not ($ifMatch.StartsWith('"') -and $ifMatch.EndsWith('"')) -and -not $ifMatch.StartsWith('W/"')) {
+                $ifMatch = '"' + $ifMatch + '"'
+            }
+            $headers["If-Match"] = $ifMatch
+        }
         $params = @{
             Method  = $Method
             Uri     = "$base$Path"
@@ -347,7 +448,7 @@ function Detect-PcVersion([string]$Override) {
         return (Parse-PcVersion $env:PRISM_PC_VERSION)
     }
     try {
-        $r = Invoke-Prism GET "/api/clustermgmt/v4.0/config/clusters?`$limit=50" $null $null
+        $r = Invoke-Prism GET "/api/clustermgmt/v4.0/config/clusters?`$limit=50" $null $null $null
         if ($r.Status -eq 200 -and $r.Body -and $r.Body.data) {
             foreach ($c in @($r.Body.data)) {
                 $funcs = @($c.config.clusterFunction)
@@ -358,7 +459,7 @@ function Detect-PcVersion([string]$Override) {
         }
     } catch {}
     try {
-        $r = Invoke-Prism GET "/api/prism/v4.0/config/domain-managers?`$limit=10" $null $null
+        $r = Invoke-Prism GET "/api/prism/v4.0/config/domain-managers?`$limit=10" $null $null $null
         if ($r.Status -eq 200 -and $r.Body -and $r.Body.data) {
             foreach ($dm in @($r.Body.data)) {
                 if ($dm.config -and $dm.config.buildInfo -and $dm.config.buildInfo.version) {
@@ -368,7 +469,7 @@ function Detect-PcVersion([string]$Override) {
         }
     } catch {}
     try {
-        $r = Invoke-Prism POST "/api/nutanix/v3/clusters/list" @{ kind = "cluster"; length = 50 } $null
+        $r = Invoke-Prism POST "/api/nutanix/v3/clusters/list" @{ kind = "cluster"; length = 50 } $null $null
         if ($r.Status -eq 200 -and $r.Body -and $r.Body.entities) {
             foreach ($e in @($r.Body.entities)) {
                 $svcs = @($e.status.resources.config.service_list)
@@ -390,7 +491,7 @@ function Resolve-IamVersion([string]$Preferred) {
     }
     $tried = @()
     foreach ($ver in $candidates) {
-        $probe = Invoke-Prism GET "/api/iam/$ver/authz/operations?`$page=0&`$limit=1" $null $null
+        $probe = Invoke-Prism GET "/api/iam/$ver/authz/operations?`$page=0&`$limit=1" $null $null $null
         if ($probe.Status -eq 200) {
             return $ver
         }
@@ -402,7 +503,7 @@ function Resolve-IamVersion([string]$Preferred) {
             throw "Probing IAM $ver failed ($($probe.Status)): $(Format-PrismError $probe.Body)"
         }
     }
-    $alpha = Invoke-Prism GET "/api/iam/v4.0.a1/authz/operations?`$page=0&`$limit=1" $null $null
+    $alpha = Invoke-Prism GET "/api/iam/v4.0.a1/authz/operations?`$page=0&`$limit=1" $null $null $null
     if ($alpha.Status -eq 200) {
         throw "Prism Central at $base only exposes IAM v4.0.a1, which does not support /authz/authorization-policies. Upgrade Prism Central (pc.2024.2+ / 7.x) or assign the role in the UI."
     }
@@ -415,7 +516,7 @@ function Get-Pages([string]$Path) {
     while ($true) {
         $join = "?"
         if ($Path.Contains("?")) { $join = "&" }
-        $result = Invoke-Prism GET "$Path${join}`$page=$page&`$limit=100" $null $null
+        $result = Invoke-Prism GET "$Path${join}`$page=$page&`$limit=100" $null $null $null
         if ($result.Status -ne 200) {
             throw "GET $Path failed ($($result.Status)): $(Format-PrismError $result.Body)"
         }
@@ -427,30 +528,33 @@ function Get-Pages([string]$Path) {
             $total = $result.Body.metadata.totalAvailableResults
         }
         $page++
-        if ($rows.Count -eq 0 -or $rows.Count -lt 100 -or ($null -ne $total -and ($page * 100) -ge $total)) {
+        if ($rows.Count -eq 0) { return $all }
+        if ($null -ne $total) {
+            if ($all.Count -ge $total) { return $all }
+        } elseif ($rows.Count -lt 100) {
             return $all
         }
     }
 }
 
-function Update-PrismRole([string]$IamBase, [string]$RoleId, $Body) {
+function Update-PrismResource([string]$UrlPath, [string]$Label, $Body) {
     for ($attempt = 1; $attempt -le 2; $attempt++) {
-        $current = Invoke-Prism GET "$IamBase/authz/roles/$RoleId" $null $null
+        $current = Invoke-Prism GET $UrlPath $null $null $null
         if ($current.Status -ne 200) {
-            throw "GET role $RoleId failed ($($current.Status)): $(Format-PrismError $current.Body)"
+            throw "GET $Label failed ($($current.Status)): $(Format-PrismError $current.Body)"
         }
         $etag = Get-PrismEtag $current
         if (-not $etag) {
-            throw "GET role $RoleId returned no ETag header or `$reserved.Etag; cannot send If-Match for PUT."
+            throw "GET $Label returned no ETag header or `$reserved.Etag; cannot send If-Match for PUT."
         }
-        $updated = Invoke-Prism PUT "$IamBase/authz/roles/$RoleId" $Body $etag
+        $updated = Invoke-Prism PUT $UrlPath $Body $etag $null
         if ($updated.Status -in 200, 202) {
             return $true
         }
         if ($updated.Status -eq 412 -and $attempt -lt 2) {
             continue
         }
-        throw "update role failed ($($updated.Status)): $(Format-PrismError $updated.Body)"
+        throw "update $Label failed ($($updated.Status)): $(Format-PrismError $updated.Body)"
     }
 }
 
@@ -469,12 +573,14 @@ $byName = @{}
 $byId = @{}
 foreach ($row in $operations) {
     if ($row.extId) { $byId[[string]$row.extId] = $row }
-    $label = $row.displayName
-    if (-not $label) { $label = $row.name }
-    if ($label) {
+    if (-not (Test-IsAssignableOperation $row)) { continue }
+    $labels = @()
+    if ($row.PSObject.Properties['displayName'] -and $row.displayName) { $labels += [string]$row.displayName }
+    if ($row.PSObject.Properties['name'] -and $row.name) { $labels += [string]$row.name }
+    foreach ($label in $labels) {
         $normKey = ConvertTo-Norm $label
         if (-not $byName.ContainsKey($normKey)) { $byName[$normKey] = @() }
-        $byName[$normKey] += $row
+        if ($byName[$normKey] -notcontains $row) { $byName[$normKey] += $row }
     }
 }
 
@@ -508,13 +614,22 @@ foreach ($item in $permissions) {
     }
 }
 
-# Ensure at least one VM create/delete/view operation matched even if PC version could not be detected
-$hasVmCreate = ($byName.ContainsKey((ConvertTo-Norm "Create New Virtual Machine")) -or $byName.ContainsKey((ConvertTo-Norm "Create Virtual Machine")))
-$hasVmDelete = ($byName.ContainsKey((ConvertTo-Norm "Delete Existing Virtual Machine")) -or $byName.ContainsKey((ConvertTo-Norm "Delete Virtual Machine")))
-$hasVmView   = ($byName.ContainsKey((ConvertTo-Norm "View Existing Virtual Machine")) -or $byName.ContainsKey((ConvertTo-Norm "View Virtual Machine")))
-if (-not $hasVmCreate -and ($missingRequired -notcontains "Create Virtual Machine")) { $missingRequired += "Create Virtual Machine" }
-if (-not $hasVmDelete -and ($missingRequired -notcontains "Delete Virtual Machine")) { $missingRequired += "Delete Virtual Machine" }
-if (-not $hasVmView   -and ($missingRequired -notcontains "View Virtual Machine"))   { $missingRequired += "View Virtual Machine" }
+# Ensure at least one equivalent operation matched for renamed operation groups
+$requiredGroups = @(
+    @{ Label = "Create Virtual Machine";   Alts = @("Create New Virtual Machine", "Create Virtual Machine") },
+    @{ Label = "Delete Virtual Machine";   Alts = @("Delete Existing Virtual Machine", "Delete Virtual Machine") },
+    @{ Label = "View Virtual Machine";     Alts = @("View Existing Virtual Machine", "View Virtual Machine") },
+    @{ Label = "View Storage Container";   Alts = @("View Container", "View Storage Container") }
+)
+foreach ($grp in $requiredGroups) {
+    $found = $false
+    foreach ($alt in $grp.Alts) {
+        if ($byName.ContainsKey((ConvertTo-Norm $alt))) { $found = $true; break }
+    }
+    if (-not $found -and ($missingRequired -notcontains $grp.Label)) {
+        $missingRequired += $grp.Label
+    }
+}
 
 # Recursively resolve predecessor / related operations (relatedOperationList) just like Prism Central UI does
 $queue = New-Object System.Collections.Generic.Queue[object]
@@ -528,28 +643,29 @@ while ($queue.Count -gt 0) {
     foreach ($relIdRaw in @($cur.relatedOperationList)) {
         $relId = [string]$relIdRaw
         if (-not $relId -or $selectedById.ContainsKey($relId)) { continue }
+        $relRow = $null
         if ($byId.ContainsKey($relId)) {
             $relRow = $byId[$relId]
+        } else {
+            $fetched = Invoke-Prism GET "$iamBase/authz/operations/$relId" $null $null $null
+            if ($fetched.Status -eq 200 -and $fetched.Body -and $fetched.Body.data) {
+                $relRow = $fetched.Body.data
+            }
+        }
+        if ($relRow) {
+            if (-not (Test-IsAssignableOperation $relRow)) { continue }
             $selectedById[$relId] = $relRow
             $resolvedRelated += $relRow
             $queue.Enqueue($relRow)
         } else {
-            # Fallback: fetch operation by extId if it was omitted from list pagination
-            $fetched = Invoke-Prism GET "$iamBase/authz/operations/$relId" $null $null
-            if ($fetched.Status -eq 200 -and $fetched.Body -and $fetched.Body.data) {
-                $relRow = $fetched.Body.data
-                $selectedById[$relId] = $relRow
-                $resolvedRelated += $relRow
-                $queue.Enqueue($relRow)
-            } else {
-                $selectedById[$relId] = [pscustomobject]@{ extId = $relId; displayName = $relId }
-                $resolvedRelated += $selectedById[$relId]
-            }
+            $fallback = [pscustomobject]@{ extId = $relId; displayName = $relId }
+            $selectedById[$relId] = $fallback
+            $resolvedRelated += $fallback
         }
     }
 }
 
-Write-Host "matched $($directList.Count) direct permissions + $($resolvedRelated.Count) predecessor/related operations (total $($selectedById.Count))"
+Write-Host "matched $($directList.Count) direct permissions + $($resolvedRelated.Count) predecessor/related operations (total $($selectedById.Count) from $($operations.Count) PC operations)"
 if ($missingOptional.Count) { Write-Host "not on this Prism Central (optional): $($missingOptional -join ', ')" }
 if ($missingRequired.Count) { throw "missing required permissions: $($missingRequired -join ', ')" }
 
@@ -573,13 +689,15 @@ $operationIds = @($selectedById.Keys)
 $roles = @(Get-Pages "$iamBase/authz/roles")
 $role = $roles | Where-Object { $_.displayName -eq $roleName } | Select-Object -First 1
 $pcTag = if ($pcVer) { "PC $($pcVer.Raw)" } else { "PC v4" }
+# Note: Prism Central IAM v4 Role.description forbids ()+&%<>;"'`/\ characters
+$roleDesc = "Permissions for NKP 2.19 CAPX, CCM, CAREN, IPAM, and CSI 3.9 on $pcTag with auto-resolved related operations."
 $body = @{
     displayName = $roleName
-    description = "Permissions for NKP 2.19 (CAPX + CCM + CSI 3.9, $pcTag) with auto-resolved related operations."
+    description = $roleDesc
     operations  = $operationIds
 }
 if (-not $role) {
-    $created = Invoke-Prism POST "$iamBase/authz/roles" $body $null
+    $created = Invoke-Prism POST "$iamBase/authz/roles" $body $null $null
     if ($created.Status -in 200, 201, 202) {
         $role = if ($created.Body.data) { $created.Body.data } else { $created.Body }
         Write-Host "created role $roleName ($($operationIds.Count) operations)"
@@ -589,19 +707,19 @@ if (-not $role) {
         if (-not $role) {
             throw "create role returned 409 conflict, but role $roleName was not found: $(Format-PrismError $created.Body)"
         }
-        $null = Update-PrismRole $iamBase $role.extId $body
+        $null = Update-PrismResource "$iamBase/authz/roles/$($role.extId)" "role $roleName" $body
         Write-Host "updated role $roleName ($($operationIds.Count) operations, recovered from 409 conflict)"
     } else {
         throw "create role failed ($($created.Status)): $(Format-PrismError $created.Body)"
     }
 } else {
-    $null = Update-PrismRole $iamBase $role.extId $body
+    $null = Update-PrismResource "$iamBase/authz/roles/$($role.extId)" "role $roleName" $body
     Write-Host "updated role $roleName ($($operationIds.Count) operations)"
 }
 
 $pcUser = $null
 $quotedUser = [Uri]::EscapeDataString($nkpUser.Replace("'", "''"))
-$filtered = Invoke-Prism GET "$iamBase/authn/users?`$filter=username%20eq%20'$quotedUser'" $null $null
+$filtered = Invoke-Prism GET "$iamBase/authn/users?`$filter=username%20eq%20'$quotedUser'" $null $null $null
 if ($filtered.Status -eq 200 -and $filtered.Body -and $filtered.Body.data) {
     $pcUser = @($filtered.Body.data) | Where-Object { $_.username -eq $nkpUser } | Select-Object -First 1
 }
@@ -611,16 +729,13 @@ if (-not $pcUser) {
 }
 if (-not $pcUser) { throw "Prism Central user $nkpUser does not exist. Create the user first." }
 
-$policies = @(Get-Pages "$iamBase/authz/authorization-policies")
-$existingPolicy = $policies | Where-Object { $_.displayName -eq $policyName } | Select-Object -First 1
-if ($existingPolicy) {
-    if ($existingPolicy.role -and $existingPolicy.role -ne $role.extId) {
-        Write-Warning "policy $policyName already exists but points to role $($existingPolicy.role) instead of $($role.extId)"
-    } else {
-        Write-Host "policy $policyName already exists"
-    }
-    return
+$userType = if ($pcUser.PSObject.Properties['userType'] -and $pcUser.userType) { [string]$pcUser.userType } else { "unknown" }
+$userStatus = if ($pcUser.PSObject.Properties['status'] -and $pcUser.status) { [string]$pcUser.status } else { "unknown" }
+Write-Host "Target user: $nkpUser (type=$userType, status=$userStatus, extId=$($pcUser.extId))"
+if ($userStatus -ne "unknown" -and $userStatus.ToUpper() -ne "ACTIVE") {
+    Write-Warning "User $nkpUser status is $userStatus (expected ACTIVE)."
 }
+
 $policy = @{
     displayName             = $policyName
     description             = "Assign $roleName to $nkpUser for all entities."
@@ -629,11 +744,55 @@ $policy = @{
     identities              = @(@{ '$reserved' = @{ user = @{ uuid = @{ anyof = @($pcUser.extId) } } } })
     entities                = @(@{ '$reserved' = @{ '*' = @{ '*' = @{ eq = '*' } } } })
 }
-$made = Invoke-Prism POST "$iamBase/authz/authorization-policies" $policy $null
-if ($made.Status -in 200, 201, 202) {
-    Write-Host "assigned $roleName to $nkpUser"
-} elseif ($made.Status -eq 409) {
-    Write-Host "policy $policyName already exists (409)"
+
+$policies = @(Get-Pages "$iamBase/authz/authorization-policies")
+$existingPolicy = $policies | Where-Object { $_.displayName -eq $policyName } | Select-Object -First 1
+if ($existingPolicy) {
+    $null = Update-PrismResource "$iamBase/authz/authorization-policies/$($existingPolicy.extId)" "policy $policyName" $policy
+    Write-Host "updated policy $policyName (role=$roleName, user=$nkpUser, scope=all entities)"
 } else {
-    throw "create policy failed ($($made.Status)): $(Format-PrismError $made.Body)"
+    $made = Invoke-Prism POST "$iamBase/authz/authorization-policies" $policy $null $null
+    if ($made.Status -in 200, 201, 202) {
+        Write-Host "assigned $roleName to $nkpUser (policy=$policyName, scope=all entities)"
+    } elseif ($made.Status -eq 409) {
+        $policies = @(Get-Pages "$iamBase/authz/authorization-policies")
+        $existingPolicy = $policies | Where-Object { $_.displayName -eq $policyName } | Select-Object -First 1
+        if ($existingPolicy) {
+            $null = Update-PrismResource "$iamBase/authz/authorization-policies/$($existingPolicy.extId)" "policy $policyName" $policy
+            Write-Host "updated policy $policyName (recovered from 409 conflict)"
+        } else {
+            Write-Host "policy $policyName already exists (409)"
+        }
+    } else {
+        throw "create policy failed ($($made.Status)): $(Format-PrismError $made.Body)"
+    }
+}
+
+if ($nkpAuthPair) {
+    Write-Host ""
+    Write-Host "Verifying NKP API access as $nkpUser ..."
+    $checks = @(
+        @{ Label = "CAREN ValidateCredentials (View User)";          Path = "$iamBase/authn/users?`$limit=1" },
+        @{ Label = "CAREN/CAPX/CCM Version (View Domain Manager)";   Path = "/api/prism/v4.0/config/domain-managers" },
+        @{ Label = "Clusters (View Cluster)";                        Path = "/api/clustermgmt/v4.0/config/clusters?`$limit=1" },
+        @{ Label = "Storage Containers (View Container)";            Path = "/api/clustermgmt/v4.0/config/storage-containers?`$limit=1" },
+        @{ Label = "Images (View Image)";                            Path = "/api/vmm/v4.0/content/images?`$limit=1" },
+        @{ Label = "Subnets (View Subnet)";                          Path = "/api/networking/v4.0/config/subnets?`$limit=1" },
+        @{ Label = "AHV VMs (View Existing Virtual Machine)";        Path = "/api/vmm/v4.0/ahv/config/vms?`$limit=1" },
+        @{ Label = "Categories (View Category)";                     Path = "/api/prism/v4.0/config/categories?`$limit=1" }
+    )
+    $failedChecks = 0
+    foreach ($chk in $checks) {
+        $res = Invoke-Prism GET $chk.Path $null $null $nkpAuthPair
+        if ($res.Status -eq 200) {
+            Write-Host "  [PASS 200] $($chk.Label)"
+        } else {
+            $failedChecks++
+            Write-Warning "  [FAIL $($res.Status)] $($chk.Label) -> $(Format-PrismError $res.Body)"
+        }
+    }
+    if ($failedChecks -gt 0) {
+        throw "Verification failed for $failedChecks NKP API check(s) as $nkpUser."
+    }
+    Write-Host "All $($checks.Count) NKP API permission checks passed as $nkpUser."
 }
