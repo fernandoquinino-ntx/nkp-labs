@@ -1,6 +1,7 @@
 # Banco de Occidente — management cluster nkp-mgmt-prodtgu01.
 # Copy to values.local.yaml on the bastion. Do not commit values.local.yaml.
-# Still required before install: Prism URL, password, PC UUID, storage container, SSH public key.
+# Still required before install: Prism password, PC UUID, storage container, SSH public key.
+# Put the password only in values.local.yaml on the bastion. Do not commit it.
 # The image NKP_UBUNTU_PRO_2404 must already exist in Prism Central. It does not today.
 mode: management
 airgapped: true
@@ -10,12 +11,12 @@ namespace: kommander
 clusterDomain: bancodeoccidente.lan
 
 prism:
-  endpoint: "https://CHANGE-ME:9440"
+  endpoint: "https://192.168.170.15:9440"
   insecure: true
-  username: admin
+  username: nkp_admin_user
   password: "CHANGE-ME"
   prismCentralUuid: "00000000-0000-0000-0000-000000000000"
-  prismElement: "nkp-mgmt-prodtgu01"
+  prismElement: "NKP_PRISMELTGU"
   subnet: "VLAN 4031"
 
 clusterNetwork:
@@ -48,7 +49,8 @@ workers:
 extraAPIServerCertSANs:
   - nkp-mgmt-prodtgu01.bancodeoccidente.lan
   - 172.16.112.10
-ntpServers: []
+ntpServers:
+  - 10.4.101.18
 
 csi:
   storageContainer: "CHANGE-ME"
