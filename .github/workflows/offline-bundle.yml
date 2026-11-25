@@ -30,6 +30,8 @@ jobs:
 
       - name: Build the offline bundle
         id: build
+        env:
+          NKP_FALLBACK_BUNDLE_URL: https://github.com/${{ github.repository }}/releases/download/offline-bundle/nkp-bootstrap-offline-v2.19.1-noble-amd64.tar.gz
         run: |
           bash 12-bootstrap-machine/scripts/build-offline-bundle.sh "$PWD/dist"
           cp 12-bootstrap-machine/cloud-init-offline.yaml dist/

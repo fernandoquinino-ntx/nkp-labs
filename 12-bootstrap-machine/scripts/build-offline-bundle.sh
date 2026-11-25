@@ -74,15 +74,39 @@ if [ -n "${NKP_SHA256}" ] && [ -f "${nkp_tar}" ]; then
       ok=true
       break
     fi
-    echo "  nkp sha256 mismatch on attempt ${attempt} (got ${got}), retrying clean download..." >&2
+    sz="$(wc -c < "${nkp_tar}" 2>/dev/null || echo 0)"
+    echo "  nkp sha256 mismatch on attempt ${attempt} (got ${got}, size=${sz} bytes), retrying clean download..." >&2
     rm -f "${CACHE}/${nkp_file}" "${CACHE}/${nkp_file}.part" "${nkp_tar}"
     if [ -n "${nkp_url}" ] && [ "${attempt}" -lt 3 ]; then
+      hdr_tmp="${WORK}/nkp-attempt-${attempt}.hdr"
       curl -fL --http1.1 --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 30 -sS \
-        -o "${CACHE}/${nkp_file}.part" "${nkp_url}"
+        -H "Cache-Control: no-cache" -H "Pragma: no-cache" \
+        -D "${hdr_tmp}" \
+        -o "${CACHE}/${nkp_file}.part" "${nkp_url}?cb=$(date +%s)-${attempt}"
+      grep -iE '^(HTTP/|content-length:|etag:|x-cache:|x-amz-cf-pop:|last-modified:)' "${hdr_tmp}" >&2 || true
+      rm -f "${hdr_tmp}"
       mv -f "${CACHE}/${nkp_file}.part" "${CACHE}/${nkp_file}"
       cp -f "${CACHE}/${nkp_file}" "${nkp_tar}"
     fi
   done
+  if [ "${ok}" != "true" ] && [ -n "${NKP_FALLBACK_BUNDLE_URL:-}" ]; then
+    echo "  downloads.d2iq.com served a mismatched archive; attempting sha256-verified fallback from ${NKP_FALLBACK_BUNDLE_URL} ..." >&2
+    if curl -fL --retry 3 --retry-all-errors --connect-timeout 30 -sS "${NKP_FALLBACK_BUNDLE_URL}" \
+      | tar -xzO "nkp-offline/downloads/${nkp_file}" > "${CACHE}/${nkp_file}.part" 2>/dev/null; then
+      got="$(sha256 "${CACHE}/${nkp_file}.part" | awk '{print $1}')"
+      if [ "${got}" = "${NKP_SHA256}" ]; then
+        mv -f "${CACHE}/${nkp_file}.part" "${CACHE}/${nkp_file}"
+        cp -f "${CACHE}/${nkp_file}" "${nkp_tar}"
+        ok=true
+        echo "  nkp sha256 ok (verified from fallback bundle)" >&2
+      else
+        echo "  fallback nkp sha256 mismatch (got ${got})" >&2
+        rm -f "${CACHE}/${nkp_file}.part"
+      fi
+    else
+      rm -f "${CACHE}/${nkp_file}.part"
+    fi
+  fi
   if [ "${ok}" != "true" ]; then
     echo "nkp archive checksum mismatch after retries. Removed from the cache." >&2
     exit 1
