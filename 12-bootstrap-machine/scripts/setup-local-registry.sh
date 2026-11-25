@@ -62,9 +62,26 @@ EOF
 fi
 openssl verify -CAfile "${STATE}/certs/ca.crt" "${STATE}/certs/registry.crt"
 
-hash="$(openssl passwd -apr1 "${REG_PASSWORD}")"
-printf '%s:%s\n' "${REG_USER}" "${hash}" > "${STATE}/auth/htpasswd"
-chmod 600 "${STATE}/auth/htpasswd"
+# registry:2 accepts only bcrypt. An apr1 hash from `openssl passwd -apr1` is
+# rejected as "authentication failure" (HTTP 401) even with the right password.
+htpasswd_bin=""
+if command -v htpasswd >/dev/null 2>&1 && htpasswd -nbB "${REG_USER}" test >/dev/null 2>&1; then
+  htpasswd_bin="$(command -v htpasswd)"
+else
+  tool="$(mktemp -d)"
+  for deb in "${LAB}"/vendor/htpasswd/*.deb; do
+    dpkg-deb -x "${deb}" "${tool}"
+  done
+  if [ ! -x "${tool}/usr/bin/htpasswd" ]; then
+    echo "htpasswd -B is not available and ${LAB}/vendor/htpasswd has no packages" >&2
+    exit 1
+  fi
+  htpasswd_bin="${tool}/usr/bin/htpasswd"
+  export LD_LIBRARY_PATH="${tool}/usr/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+fi
+"${htpasswd_bin}" -nbB "${REG_USER}" "${REG_PASSWORD}" > "${STATE}/auth/htpasswd"
+chmod 644 "${STATE}/auth/htpasswd"
+"${htpasswd_bin}" -vb "${STATE}/auth/htpasswd" "${REG_USER}" "${REG_PASSWORD}" >/dev/null
 
 # Bastion Docker trusts this registry. Cluster nodes get the same CA via trust-registry.sh.
 if [ -d /etc/docker ] && [ "$(id -u)" -eq 0 ]; then
