@@ -63,7 +63,11 @@ Use one path for a given cluster name.
 | `values.example.yaml` | NKP cluster values. Copy to `values.local.yaml` (gitignored) |
 | `scripts/install-nkp.sh` | Helm path: `nkp create bootstrap`, chart, kubeconfig, pivot, optional Kommander |
 | `create-cluster.env.example` | CLI path values. Copy to `create-cluster.env` (gitignored) |
-| `scripts/create-cluster.sh` | CLI path: `nkp create cluster nutanix --self-managed` |
+| `scripts/create-cluster.sh` | CLI path: `nkp create cluster nutanix --self-managed` (auto-detects air-gap bootstrap tar, patches CoreDNS & `/etc/hosts`) |
+| `scripts/preflight.sh` | 5-second fail-fast check before `create-cluster.sh` (env, disk, registry TLS + pushed bundles, VIP conflicts, Prism objects) |
+| `scripts/push-airgap-bundles.sh` | idempotent air-gap helper: extracts the 33 GB bundle if needed and pushes `konvoy` + `kommander` bundles to the local registry |
+| `scripts/post-install-info.sh` | Day-0 handoff summary: nodes, CAPI status, CoreDNS check, Flux `HelmRelease` health, Kommander URL/credentials, workstation hosts entry |
+| `scripts/cleanup-bootstrap.sh` | safely removes stuck kind bootstrap containers after a failed install without touching `nkp-registry`, `airgap/`, or env files |
 | `scripts/fetch-airgap-bundle.sh` | download the 2.19.1 air-gapped bundle (~33 GiB). Resumes, checks the size, writes `.complete`. Run by `nkp-airgap-download.service`. Log: `/var/log/nkp-bootstrap.log` |
 | `scripts/setup-local-registry.sh` | self-signed CA, registry certificate, `registry:2` on this host (bcrypt auth + Docker CA trust by host and IP) |
 | `scripts/trust-registry.sh` | Opaque Secret `username` / `password` / `ca.crt` for CAREN |
