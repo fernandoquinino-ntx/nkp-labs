@@ -35,6 +35,6 @@ tar -C "${SRC}" -czf - \
 
 echo "=== done. On the bastion the new files are in ~/nkp-workspace ==="
 echo "Install with nkp create cluster (not the Helm chart):"
-echo "  cp create-cluster.nkp-mgmt-prodtgu01.env create-cluster.env"
+echo "  cp create-cluster.env.example create-cluster.env"
 echo "  # set the Prism password, storage container, and registry password"
 echo "  ./scripts/create-cluster.sh"

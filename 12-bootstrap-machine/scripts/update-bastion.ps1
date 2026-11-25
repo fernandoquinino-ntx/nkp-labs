@@ -2,7 +2,7 @@
 # Does not delete env, values.local.yaml, create-cluster.env, registry/, airgap/, or kubeconfigs
 # already on the bastion. Those files are not in the public archive.
 #
-#   powershell -ExecutionPolicy Bypass -File .\update-bastion.ps1 -Target ubuntu@172.16.112.9
+#   powershell -ExecutionPolicy Bypass -File .\update-bastion.ps1 -Target ubuntu@<bastion-ip>
 #Requires -Version 5.1
 param(
     [Parameter(Mandatory = $true)]
