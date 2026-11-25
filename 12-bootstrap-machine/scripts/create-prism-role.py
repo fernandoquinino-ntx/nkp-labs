@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Create the Prism Central role NKP needs, and assign it to an existing user.
+"""Create (or update) the Prism Central role NKP 2.19 needs, and assign it to an existing user.
 
-The permission set is the NKP 2.19 minimum from
-https://portal.nutanix.com/page/documents/details?targetId=Nutanix-Kubernetes-Platform-v2_19:top-prism-central-role-permissions-r.html
-plus the CAPX operations cluster create actually calls (power on, VM disks,
-category mapping). Documented for PC 7.3 and later:
-https://opendocs.nutanix.com/capx/v1.9.x/user_requirements/
-
-The public write-up of that same NKP table is
-https://itcs.lu/blog/nkp-introduction-part-2
+Covers NKP 2.19 + CAPX v1.9/v1.10 + CCM + Nutanix CSI 3.7/3.9 across Prism Central
+2024.x, pc.7.3, pc.7.5, and pc.7.6+:
+  - Auto-detects the Prism Central version (or honours PRISM_PC_VERSION).
+  - Matches BOTH legacy v3 and v4 operation names whenever present on the PC
+    (e.g. Create New Virtual Machine + Create Virtual Machine, Create Category +
+    Create Or Update Name Category, Create/Update Virtual Machine NIC, View Task,
+    CSI 3.9 Volume Group Disk/Categories/iSCSI operations).
+  - Recursively resolves relatedOperationList (predecessor/dependent operations)
+    just like the Prism Central UI does when saving a custom role.
 
 Does not create the user and does not print the password.
 
@@ -21,8 +22,10 @@ Does not create the user and does not print the password.
   ./scripts/create-prism-role.py --print
 """
 
+from collections import deque
 import json
 import os
+import re
 import ssl
 import sys
 import time
@@ -33,51 +36,141 @@ import urllib.request
 
 IAM_VERSIONS = ["v4.0", "v4.1", "v4.1.b3", "v4.1.b2", "v4.1.b1", "v4.0.b1"]
 
-# (accepted display names, required). The first name is the one NKP documents.
+# (operation display name, min_pc_required: "" | "all" | "7.3" | "7.5")
 PERMISSIONS = [
-    (["Create Virtual Machine", "Create New Virtual Machine"], True),
-    (["Delete Virtual Machine"], True),
-    (["View Virtual Machine"], True),
-    (["View Virtual Machine Disk"], True),
-    (["Update Virtual Machine"], True),
-    (["Power On Virtual Machine"], True),
-    (["Create Virtual Machine Disk"], True),
-    (["Delete Virtual Machine Disk"], True),
-    (["Create Or Update Name Category"], True),
-    (["Create Or Update Value Category"], True),
-    (["Delete Name Category"], True),
-    (["Delete Value Category"], True),
-    (["View Name Category"], True),
-    (["View Value Category"], True),
-    (["Create Category Mapping"], True),
-    (["Delete Category Mapping"], True),
-    (["Update Category Mapping"], True),
-    (["View Category Mapping"], True),
-    (["View Cluster"], True),
-    (["View Host"], True),
-    (["View Image"], True),
-    (["View Prism Central"], True),
-    (["View Project"], True),
-    (["View Subnet"], True),
-    (["Detach Volume Group From AHV VM"], True),
-    (["View VPC"], False),
-    (["View Overlay Subnet"], False),
-    (["View Cluster Pgpu Profiles"], False),
-    (["View Cluster Vgpu Profiles"], False),
-    (["Update Virtual Machine Custom Attributes"], False),
-    (["Create Image"], False),
-    (["Delete Image"], False),
-    (["Create Volume Group"], False),
-    (["View Volume Group"], False),
-    (["Delete Volume Group"], False),
-    (["Update Volume Group"], False),
-    (["Attach Volume Group To AHV VM"], False),
-    (["View Storage Container"], False),
+    # --- AHV VM (v4 + legacy v3) ---
+    ("Create New Virtual Machine", "7.3"),
+    ("Create Virtual Machine", ""),
+    ("Delete Existing Virtual Machine", "7.3"),
+    ("Delete Virtual Machine", ""),
+    ("View Existing Virtual Machine", "7.3"),
+    ("View Virtual Machine", ""),
+    ("Update Virtual Machine", ""),
+    ("Update Virtual Machine Basic Config", ""),
+    ("Update Virtual Machine Custom Attributes", ""),
+    ("Update Virtual Machine Project", ""),
+    ("Customise Virtual Machine Guest", ""),
+    ("Assign Virtual Machine Owner", ""),
+    ("Power On Virtual Machine", "all"),
+    ("Power Off Virtual Machine", ""),
+    ("Power Cycle Virtual Machine", ""),
+    ("Reset Virtual Machine", ""),
+    ("ACPI Shutdown Virtual Machine", ""),
+    ("Guest Shutdown Virtual Machine", ""),
+    ("Create Virtual Machine Disk", "all"),
+    ("Delete Virtual Machine Disk", "all"),
+    ("Update Virtual Machine Disk", ""),
+    ("Update Virtual Machine Disk List", ""),
+    ("View Virtual Machine Disk", "all"),
+    ("Create Virtual Machine NIC", "7.5"),
+    ("Update Virtual Machine NIC", "7.5"),
+    ("Delete Virtual Machine NIC", ""),
+    ("View Virtual Machine NIC", ""),
+    ("Assign Virtual Machine NIC IP", ""),
+    ("Release Virtual Machine NIC IP", ""),
+    ("Associate Virtual Machine Categories", ""),
+    ("Disassociate Virtual Machine Categories", ""),
+    ("Create Virtual Machine CD ROM", ""),
+    ("Delete Virtual Machine CD ROM", ""),
+    ("Eject Virtual Machine CD ROM", ""),
+    ("Insert Virtual Machine CD ROM", ""),
+    ("View Virtual Machine CD ROM", ""),
+    ("Create Virtual Machine GPU", ""),
+    ("Delete Virtual Machine GPU", ""),
+    ("View Virtual Machine GPU", ""),
+    # --- Categories (v4 for PC 7.3/7.5+ AND legacy v3) ---
+    ("Create Category", "7.3"),
+    ("Delete Category", "7.3"),
+    ("Update Category", ""),
+    ("View Category", "7.3"),
+    ("Create Or Update Name Category", ""),
+    ("Create Or Update Value Category", ""),
+    ("Delete Name Category", ""),
+    ("Delete Value Category", ""),
+    ("View Name Category", ""),
+    ("View Value Category", ""),
+    ("Create Category Mapping", ""),
+    ("Delete Category Mapping", ""),
+    ("Update Category Mapping", ""),
+    ("View Category Mapping", ""),
+    # --- Tasks & Prism Central ---
+    ("View Task", ""),
+    ("Fetch Task Response", ""),
+    ("View Prism Central", ""),
+    # --- Cluster, Host, Image, Project, Storage Container ---
+    ("View Cluster", "all"),
+    ("View Host", "all"),
+    ("View Cluster Host", ""),
+    ("View Cluster Pgpu Profiles", ""),
+    ("View Cluster Vgpu Profiles", ""),
+    ("Get Cluster Network Segment", ""),
+    ("View Storage Container", ""),
+    ("View Project", "all"),
+    ("View Resource Groups", ""),
+    ("View Image", "all"),
+    ("Create Image", ""),
+    ("Delete Image", ""),
+    ("Update Image", ""),
+    # --- Networking ---
+    ("View Subnet", "all"),
+    ("View Overlay Subnet", ""),
+    ("View VPC", ""),
+    ("Reserve Subnet Ip", ""),
+    ("Unreserve Subnet Ip", ""),
+    ("View Subnet Reserved Ip", ""),
+    # --- Volume Groups & CSI 3.7 / 3.9 ---
+    ("Create Volume Group", ""),
+    ("Delete Volume Group", ""),
+    ("Update Volume Group", ""),
+    ("Update Volume Group Details", ""),
+    ("View Volume Group", ""),
+    ("View Volume Group Details", ""),
+    ("View Volume Group Metadata", ""),
+    ("Create Volume Group Disk", ""),
+    ("Delete Volume Group Disk", ""),
+    ("Update Volume Group Disk", ""),
+    ("Update Volume Group Virtual Disks", ""),
+    ("View Volume Group Disks", ""),
+    ("Attach Volume Group To AHV VM", ""),
+    ("Detach Volume Group From AHV VM", "all"),
+    ("View Volume Group VM Attachments", ""),
+    ("Attach Volume Group To External ISCSI Client", ""),
+    ("Detach Volume Group From External ISCSI Client", ""),
+    ("View External ISCSI Client", ""),
+    ("Update External ISCSI Client", ""),
+    ("View Volume Group ISCSI Attachments", ""),
+    ("Associate Volume Group Categories", ""),
+    ("Disassociate Volume Group Categories", ""),
+    ("Update Volume Group Categories", ""),
+    ("View Volume Group Category Associations", ""),
+    ("Create Recovery Point", ""),
+    ("Delete Recovery Point", ""),
+    ("View Recovery Point", ""),
+    ("Restore Recovery Point", ""),
 ]
 
 
 def norm(value):
     return " ".join(value.replace("_", " ").replace("-", " ").lower().split())
+
+
+def parse_pc_version(raw):
+    if not raw:
+        return None
+    m = re.search(r"(\d+)\.(\d+)(?:\.(\d+))?", raw.strip())
+    if not m:
+        return None
+    maj, minor, pat = int(m.group(1)), int(m.group(2)), int(m.group(3) or 0)
+    is_73 = maj >= 7 and maj < 2000 and (maj > 7 or minor >= 3)
+    is_75 = maj >= 7 and maj < 2000 and (maj > 7 or minor >= 5)
+    return {
+        "raw": raw.strip(),
+        "major": maj,
+        "minor": minor,
+        "patch": pat,
+        "is_pc73_plus": is_73,
+        "is_pc75_plus": is_75,
+    }
 
 
 def format_error(payload):
@@ -159,6 +252,38 @@ class Prism:
             return status, headers, parsed
 
 
+def detect_pc_version(prism, override=""):
+    if override and override.strip().lower() != "auto":
+        return parse_pc_version(override)
+    for path in (
+        "/api/clustermgmt/v4.0/config/clusters?$limit=50",
+        "/api/prism/v4.0/config/domain-managers?$limit=10",
+    ):
+        try:
+            status, _, payload = prism.call("GET", path)
+            if status == 200 and isinstance(payload, dict):
+                for item in payload.get("data") or []:
+                    cfg = item.get("config") or {}
+                    funcs = cfg.get("clusterFunction") or []
+                    ver = (cfg.get("buildInfo") or {}).get("version")
+                    if ver and ("domain-managers" in path or "PRISM_CENTRAL" in funcs):
+                        return parse_pc_version(str(ver))
+        except Exception:
+            pass
+    try:
+        status, _, payload = prism.call("POST", "/api/nutanix/v3/clusters/list", {"kind": "cluster", "length": 50})
+        if status == 200 and isinstance(payload, dict):
+            for ent in payload.get("entities") or []:
+                cfg = ((ent.get("status") or {}).get("resources") or {}).get("config") or {}
+                if "PRISM_CENTRAL" in (cfg.get("service_list") or []):
+                    ver = (cfg.get("build") or {}).get("version")
+                    if ver:
+                        return parse_pc_version(str(ver))
+    except Exception:
+        pass
+    return None
+
+
 def detect_iam_version(prism, preferred=""):
     candidates = []
     if preferred:
@@ -207,23 +332,79 @@ def pages(prism, path):
 
 
 def operation_name(row):
-    return row.get("displayName") or row.get("name") or ""
+    return row.get("displayName") or row.get("name") or row.get("extId") or ""
 
 
-def select_operations(operations):
-    by_name = {norm(operation_name(row)): row for row in operations}
-    chosen = []
+def is_required(min_pc, pc_ver):
+    if min_pc == "all":
+        return True
+    if not pc_ver:
+        return False
+    if min_pc == "7.3":
+        return pc_ver["is_pc73_plus"]
+    if min_pc == "7.5":
+        return pc_ver["is_pc75_plus"]
+    return False
+
+
+def select_operations(prism, iam_base, operations, pc_ver):
+    by_name = {}
+    by_id = {}
+    for row in operations:
+        oid = row.get("extId")
+        if oid:
+            by_id[oid] = row
+        label = operation_name(row)
+        if label:
+            by_name.setdefault(norm(label), []).append(row)
+
+    selected_by_id = {}
+    direct = []
     missing_required = []
     missing_optional = []
-    for names, required in PERMISSIONS:
-        match = next((by_name[norm(name)] for name in names if norm(name) in by_name), None)
-        if match:
-            chosen.append(match)
-        elif required:
-            missing_required.append(names[0])
+
+    for name, min_pc in PERMISSIONS:
+        key = norm(name)
+        if key in by_name:
+            for row in by_name[key]:
+                oid = row.get("extId")
+                if oid and oid not in selected_by_id:
+                    selected_by_id[oid] = row
+                    direct.append(row)
+        elif is_required(min_pc, pc_ver):
+            missing_required.append(name)
         else:
-            missing_optional.append(names[0])
-    return chosen, missing_required, missing_optional
+            missing_optional.append(name)
+
+    for grp_name, alts in (
+        ("Create Virtual Machine", ("Create New Virtual Machine", "Create Virtual Machine")),
+        ("Delete Virtual Machine", ("Delete Existing Virtual Machine", "Delete Virtual Machine")),
+        ("View Virtual Machine", ("View Existing Virtual Machine", "View Virtual Machine")),
+    ):
+        if not any(norm(a) in by_name for a in alts) and grp_name not in missing_required:
+            missing_required.append(grp_name)
+
+    # Recursively expand relatedOperationList (predecessor/dependent operations)
+    queue = deque(direct)
+    related = []
+    while queue:
+        cur = queue.popleft()
+        for rel_id in cur.get("relatedOperationList") or []:
+            if not rel_id or rel_id in selected_by_id:
+                continue
+            if rel_id in by_id:
+                rel_row = by_id[rel_id]
+            else:
+                st, _, payload = prism.call("GET", f"{iam_base}/authz/operations/{rel_id}")
+                if st == 200 and isinstance(payload, dict) and isinstance(payload.get("data"), dict):
+                    rel_row = payload["data"]
+                else:
+                    rel_row = {"extId": rel_id, "displayName": rel_id}
+            selected_by_id[rel_id] = rel_row
+            related.append(rel_row)
+            queue.append(rel_row)
+
+    return selected_by_id, direct, related, missing_required, missing_optional
 
 
 def find_role(prism, iam_base, display_name):
@@ -258,6 +439,7 @@ def main():
     role_name = os.environ.get("NKP_ROLE_NAME", "NKP Cluster Create")
     policy_name = os.environ.get("NKP_POLICY_NAME", role_name + " policy")
     iam_pref = os.environ.get("PRISM_IAM_VERSION", "")
+    pc_ver_pref = os.environ.get("PRISM_PC_VERSION", "")
     insecure = os.environ.get("PRISM_INSECURE", "true").lower() != "false"
     if not endpoint or not user or not password:
         raise SystemExit("Set PRISM_ENDPOINT, PRISM_USER, and PRISM_PASSWORD.")
@@ -267,31 +449,47 @@ def main():
     prism = Prism(endpoint, user, password, insecure)
     iam_version = detect_iam_version(prism, iam_pref)
     iam_base = f"/api/iam/{iam_version}"
-    print(f"Using Prism Central IAM {iam_version} at {prism.endpoint}")
+    pc_ver = detect_pc_version(prism, pc_ver_pref)
+    if pc_ver:
+        print(f"Detected Prism Central version: {pc_ver['raw']} (IAM {iam_version} at {prism.endpoint})")
+    else:
+        print(f"Using Prism Central IAM {iam_version} at {prism.endpoint}")
+
     operations = list(pages(prism, f"{iam_base}/authz/operations"))
-    chosen, missing_required, missing_optional = select_operations(operations)
-    print(f"matched {len(chosen)} permissions")
-    for row in chosen:
-        print(f"  {operation_name(row)}")
+    selected_by_id, direct, related, missing_required, missing_optional = select_operations(
+        prism, iam_base, operations, pc_ver
+    )
+    print(
+        f"matched {len(direct)} direct permissions + {len(related)} predecessor/related operations "
+        f"(total {len(selected_by_id)})"
+    )
     if missing_optional:
         print("not on this Prism Central (optional): " + ", ".join(missing_optional))
     if missing_required:
         raise SystemExit("missing required permissions: " + ", ".join(missing_required))
     if print_only:
+        print(f"--- Direct permissions ({len(direct)}) ---")
+        for row in direct:
+            print(f"  {operation_name(row)}")
+        if related:
+            print(f"--- Auto-resolved predecessor/related operations ({len(related)}) ---")
+            for row in related:
+                print(f"  + {operation_name(row)}")
         return
 
-    operation_ids = [row["extId"] for row in chosen]
+    operation_ids = list(selected_by_id.keys())
     role = find_role(prism, iam_base, role_name)
+    pc_tag = f"PC {pc_ver['raw']}" if pc_ver else "PC v4"
     body = {
         "displayName": role_name,
-        "description": "Permissions for nkp create cluster. NKP 2.19 Prism Central role plus CAPX VM and category operations.",
+        "description": f"Permissions for NKP 2.19 (CAPX + CCM + CSI 3.9, {pc_tag}) with auto-resolved related operations.",
         "operations": operation_ids,
     }
     if role is None:
         status, _, payload = prism.call("POST", f"{iam_base}/authz/roles", body)
         if status in (200, 201, 202):
             role = payload.get("data") or payload
-            print(f"created role {role_name}")
+            print(f"created role {role_name} ({len(operation_ids)} operations)")
         elif status == 409:
             role = find_role(prism, iam_base, role_name)
             if role is None:
@@ -299,13 +497,12 @@ def main():
                     f"create role returned 409 conflict, but role {role_name} was not found: {format_error(payload)}"
                 )
             update_role(prism, iam_base, role["extId"], body)
-            print(f"updated role {role_name} (recovered from 409 conflict)")
+            print(f"updated role {role_name} ({len(operation_ids)} operations, recovered from 409 conflict)")
         else:
             raise SystemExit(f"create role failed ({status}): {format_error(payload)}")
     else:
         update_role(prism, iam_base, role["extId"], body)
-        # PUT returns a message, not the role. Keep the extId from the GET.
-        print(f"updated role {role_name}")
+        print(f"updated role {role_name} ({len(operation_ids)} operations)")
 
     pc_user = None
     quoted = urllib.parse.quote(nkp_user.replace("'", "''"))
