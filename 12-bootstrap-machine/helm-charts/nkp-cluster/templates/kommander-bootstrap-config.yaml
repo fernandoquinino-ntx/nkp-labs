@@ -13,6 +13,6 @@ data:
   kommander-install.yaml: |-
     version: {{ .Values.nkpVersion }}
     airgapped:
-      enabled: false
+      enabled: {{ .Values.airgapped }}
     clusterHostname: {{ .Values.clusterName }}.{{ .Values.clusterDomain }}
 {{- end }}

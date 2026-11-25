@@ -6,6 +6,7 @@
 # management = self-managed (kind bootstrap; host label; 5 Secrets + kommander config)
 # managed    = workload (applied to the management cluster in a workspace ns)
 mode: management
+airgapped: false
 
 # --- identity ---------------------------------------------------------------
 clusterName: nkp-mgmt
