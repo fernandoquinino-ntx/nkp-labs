@@ -93,6 +93,23 @@ fi
 if [ -n "${BOOTSTRAP_CLUSTER_IMAGE_PATH:-}" ]; then
   args+=(--bootstrap-cluster-image "${BOOTSTRAP_CLUSTER_IMAGE_PATH}")
 fi
+# Air-gap: point the cluster at the bastion registry. Leave the URL empty or CHANGE-ME to skip.
+case "${REGISTRY_MIRROR_URL:-}" in
+  ""|*CHANGE-ME*) ;;
+  *)
+    case "${REGISTRY_MIRROR_PASSWORD:-}" in
+      ""|*CHANGE-ME*) echo "set REGISTRY_MIRROR_PASSWORD from registry/credentials.env" >&2; exit 1 ;;
+    esac
+    args+=(
+      --registry-mirror-url "${REGISTRY_MIRROR_URL}"
+      --registry-mirror-username "${REGISTRY_MIRROR_USERNAME:-nkp}"
+      --registry-mirror-password "${REGISTRY_MIRROR_PASSWORD}"
+    )
+    if [ -n "${REGISTRY_MIRROR_CACERT:-}" ]; then
+      args+=(--registry-mirror-cacert "${REGISTRY_MIRROR_CACERT}")
+    fi
+    ;;
+esac
 if [ "${DRY_RUN}" = "true" ]; then
   args+=(--dry-run -o yaml)
 fi
