@@ -61,10 +61,30 @@ for url in ${URLS}; do
   cp -f "${CACHE}/${f}" "${STAGE}/downloads/${f}"
 done
 nkp_tar="${STAGE}/downloads/nkp_${NKP_VERSION}_linux_amd64.tar.gz"
+nkp_file="$(basename "${nkp_tar}")"
 if [ -n "${NKP_SHA256}" ] && [ -f "${nkp_tar}" ]; then
-  if [ "$(sha256 "${nkp_tar}" | awk '{print $1}')" != "${NKP_SHA256}" ]; then
-    rm -f "${CACHE}/$(basename "${nkp_tar}")"
-    echo "nkp archive checksum mismatch. Removed from the cache. Run again." >&2
+  nkp_url=""
+  for url in ${URLS}; do
+    if [ "$(basename "${url}")" = "${nkp_file}" ]; then nkp_url="${url}"; break; fi
+  done
+  ok=false
+  for attempt in 1 2 3; do
+    got="$(sha256 "${nkp_tar}" | awk '{print $1}')"
+    if [ "${got}" = "${NKP_SHA256}" ]; then
+      ok=true
+      break
+    fi
+    echo "  nkp sha256 mismatch on attempt ${attempt} (got ${got}), retrying clean download..." >&2
+    rm -f "${CACHE}/${nkp_file}" "${CACHE}/${nkp_file}.part" "${nkp_tar}"
+    if [ -n "${nkp_url}" ] && [ "${attempt}" -lt 3 ]; then
+      curl -fL --http1.1 --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 30 -sS \
+        -o "${CACHE}/${nkp_file}.part" "${nkp_url}"
+      mv -f "${CACHE}/${nkp_file}.part" "${CACHE}/${nkp_file}"
+      cp -f "${CACHE}/${nkp_file}" "${nkp_tar}"
+    fi
+  done
+  if [ "${ok}" != "true" ]; then
+    echo "nkp archive checksum mismatch after retries. Removed from the cache." >&2
     exit 1
   fi
   echo "  nkp sha256 ok"
