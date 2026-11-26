@@ -57,5 +57,7 @@ docker run --rm --network none --platform linux/amd64 \
     k9s version --short || k9s version
     yq --version
     nkp version || true
-    ls -l /home/ubuntu/nkp-workspace/scripts/install-nkp.sh /usr/local/bin/nkp-update
+    ls -l /home/ubuntu/nkp-workspace/scripts/install-nkp.sh /home/ubuntu/nkp-workspace/scripts/create-prism-role.py /usr/local/bin/nkp-update
+    [ -x /home/ubuntu/nkp-workspace/scripts/create-prism-role.py ]
+    /usr/local/bin/nkp-update --status
     echo "OFFLINE BUNDLE OK"'

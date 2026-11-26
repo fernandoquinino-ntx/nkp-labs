@@ -12,6 +12,15 @@ set -Eeuo pipefail
 export PATH="$PATH:/usr/sbin:/sbin:/usr/bin:/bin"
 export HOME="${HOME:-/root}"
 [ -f /etc/default/nkp-bootstrap ] && . /etc/default/nkp-bootstrap
+_VERSIONS_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)/versions.env"
+if [ -f "${_VERSIONS_FILE}" ]; then
+  # Load defaults from versions.env without overriding explicit env or /etc/default/nkp-bootstrap
+  while IFS='=' read -r _k _v; do
+    case "${_k}" in ''|\#*) continue ;; esac
+    _v="${_v#\"}"; _v="${_v%\"}"
+    if [ -z "${!_k:-}" ]; then export "${_k}=${_v}"; fi
+  done < "${_VERSIONS_FILE}"
+fi
 
 NKP_VERSION="${NKP_VERSION:-v2.19.1}"
 KUBECTL_VERSION="${KUBECTL_VERSION:-v1.36.2}"

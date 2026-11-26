@@ -11,6 +11,7 @@
 #   -PrismIp <ip-or-url> -RoleName <name> -NkpUser <user>
 #   -AdminUser <admin> -AdminPassword <pass> -PcVersion <auto|7.5|7.3|2024.3>
 #   -ApiVersion <v4.0|v4.1.b3|...> -NkpPassword <pass> -PrintOnly
+#   -CheckUpdate -SelfUpdate
 #Requires -Version 5.1
 param(
     [string]$PrismIp,
@@ -21,7 +22,9 @@ param(
     [string]$PcVersion,
     [string]$ApiVersion,
     [string]$NkpPassword,
-    [switch]$PrintOnly
+    [switch]$PrintOnly,
+    [switch]$CheckUpdate,
+    [switch]$SelfUpdate
 )
 
 $ErrorActionPreference = 'Stop'
@@ -46,6 +49,64 @@ public static class NkpTrustAllCerts {
 '@
     }
     [NkpTrustAllCerts]::Enable()
+}
+
+if ($CheckUpdate -or $SelfUpdate) {
+    $ProgressPreference = 'SilentlyContinue'
+    $repo = if ($env:NKP_LABS_GH_REPO) { $env:NKP_LABS_GH_REPO } else { 'fernandoquinino-ntx/nkp-labs' }
+    $releaseBase = if ($env:NKP_LABS_RELEASE_BASE) { $env:NKP_LABS_RELEASE_BASE.TrimEnd('/') } else { "https://github.com/$repo/releases/download/offline-bundle" }
+    $scriptPath = $MyInvocation.MyCommand.Path
+    if (-not $scriptPath -or -not (Test-Path $scriptPath)) { throw "Cannot resolve local script path for self-update." }
+    $localHash = (Get-FileHash -Algorithm SHA256 -Path $scriptPath).Hash.ToLower()
+
+    $iwrParams = @{ UseBasicParsing = $true }
+    if ($PSVersionTable.PSVersion.Major -ge 6) { $iwrParams['SkipCertificateCheck'] = $true }
+
+    $remoteHash = $null
+    $remoteSha = ""
+    try {
+        $mfResp = Invoke-WebRequest @iwrParams -Uri "$releaseBase/MANIFEST.json"
+        $mfText = if ($mfResp.Content -is [byte[]]) { [System.Text.Encoding]::UTF8.GetString($mfResp.Content) } else { [string]$mfResp.Content }
+        $mf = $mfText | ConvertFrom-Json
+        if ($mf.git_sha) { $remoteSha = [string]$mf.git_sha }
+        if ($mf.assets -and $mf.assets.PSObject.Properties['create-prism-role.ps1']) {
+            $remoteHash = ([string]$mf.assets.'create-prism-role.ps1'.sha256).ToLower()
+        }
+    } catch {}
+    if (-not $remoteHash) {
+        $sumResp = Invoke-WebRequest @iwrParams -Uri "$releaseBase/create-prism-role.ps1.sha256"
+        $sumText = if ($sumResp.Content -is [byte[]]) { [System.Text.Encoding]::UTF8.GetString($sumResp.Content) } else { [string]$sumResp.Content }
+        $remoteHash = (($sumText -split '\s+')[0]).Trim().ToLower()
+    }
+    if ($remoteHash -notmatch '^[0-9a-f]{64}$') {
+        throw "Invalid remote sha256 checksum: $remoteHash"
+    }
+    if ($localHash -eq $remoteHash) {
+        Write-Host "create-prism-role.ps1 is up-to-date (sha256=$($localHash.Substring(0,12))$(if ($remoteSha) { ", commit=$remoteSha" }))"
+        return
+    }
+    Write-Host "Update available for create-prism-role.ps1 (local=$($localHash.Substring(0,12)), remote=$($remoteHash.Substring(0,12))$(if ($remoteSha) { ", commit=$remoteSha" }))"
+    if ($CheckUpdate -and -not $SelfUpdate) { return }
+
+    $tmpFile = "$scriptPath.new"
+    try {
+        Invoke-WebRequest @iwrParams -Uri "$releaseBase/create-prism-role.ps1" -OutFile $tmpFile
+        $gotHash = (Get-FileHash -Algorithm SHA256 -Path $tmpFile).Hash.ToLower()
+        if ($gotHash -ne $remoteHash) {
+            throw "Downloaded create-prism-role.ps1 sha256 mismatch (expected $remoteHash, got $gotHash). Aborting."
+        }
+        $tokens = $null; $parseErrs = $null
+        $null = [System.Management.Automation.Language.Parser]::ParseFile($tmpFile, [ref]$tokens, [ref]$parseErrs)
+        if ($parseErrs -and $parseErrs.Count -gt 0) {
+            throw "Downloaded create-prism-role.ps1 failed PowerShell syntax check. Aborting."
+        }
+        Copy-Item -Force -Path $scriptPath -Destination "$scriptPath.bak"
+        Move-Item -Force -Path $tmpFile -Destination $scriptPath
+        Write-Host "Updated $scriptPath successfully (sha256=$($gotHash.Substring(0,12)), backup at $scriptPath.bak)"
+    } finally {
+        if (Test-Path $tmpFile) { Remove-Item -Force $tmpFile -ErrorAction SilentlyContinue }
+    }
+    return
 }
 
 function Read-Required([string]$Prompt, [string]$Default) {

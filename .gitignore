@@ -43,3 +43,14 @@ opencode-rag.json
 .opencode/rag_db.bak.*/
 .opencode/*.log
 12-bootstrap-machine/dist/
+
+# python / temp / backup / downloaded artifacts
+__pycache__/
+*.py[cod]
+*.part
+*.bak
+*.log
+*.tar.gz
+*.sha256
+.nkp-labs-version
+

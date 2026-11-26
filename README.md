@@ -10,80 +10,44 @@ The manifests are **portable templates** (they use `${PLACEHOLDERS}`); you suppl
 
 ## Labs
 
-| # | Lab | What you learn |
-|---|---|---|
-| 00 | [00-prereqs](00-prereqs/) | a namespace, a **ReadWriteMany StorageClass**, an ingress class, a **domain/DNS** (+ optional default TLS cert) |
-| 01 | [01-pvc-rwx-busybox](01-pvc-rwx-busybox/) | a **ReadWriteMany** volume shared by **two pods** (writer + reader) |
-| 02 | [02-apache-rwx-multireplica](02-apache-rwx-multireplica/) | one html volume served by **N replicas**, with **two containers in the same pod** sharing it |
-| 03 | [03-apache-metallb](03-apache-metallb/) | expose a Service with `type: LoadBalancer` (an external IP, e.g. MetalLB) |
-| 04 | [04-apache-traefik-ingress](04-apache-traefik-ingress/) | route a **hostname → Service** through the cluster ingress controller |
-| 05 | [05-nkp-appdeployment](05-nkp-appdeployment/) | deploy an application the **NKP way** (`AppDeployment` + config overrides) |
-| 06 | [06-long-lived-token-kubeconfig](06-long-lived-token-kubeconfig/) | a **long-lived ServiceAccount token** + a ready **kubeconfig** for an app/CI (least privilege) |
-| 07 | [07-velero-bsl](07-velero-bsl/) | configure a **Velero Backup Storage Location (BSL)** (UI + CLI), write **backup policies** (`Schedule`s), **back up & restore a persistent app** (volumes), + the Velero/NKP **CRDs** |
-| 08 | [08-splunk-otel-helm](08-splunk-otel-helm/) | install the **Splunk OpenTelemetry Collector** with **plain `helm`** (no catalog) — every setting explained, **logs + metrics** to Splunk over HEC, and **troubleshooting** |
-| 09 | [09-traefik-oidc-okta](09-traefik-oidc-okta/) | protect an app with **Okta OIDC** using the **Traefik OIDC plugin middleware** — a hands-on lab with a **page per step** (`steps/01…10`), no oauth2-proxy, no Dex |
-| 10 | [10-vault-install](10-vault-install/) | install **HashiCorp Vault** (dev / standalone / HA), **initialize + unseal** it, enable a **KV v2** engine and reach the UI — the prerequisite for lab 11 |
-| 11 | [11-vault-eso](11-vault-eso/) | pull a secret from **Vault** with the **External Secrets Operator** — the **`ClusterSecretStore`** (the "credential store") set via an **NKP `AppDeployment` override** (`extraObjects`), so it is **visible/editable in the UI** |
-| 12 | [12-bootstrap-machine](12-bootstrap-machine/) | paste a **Prism cloud-init** that builds the **Ubuntu jump host** and installs **self-managed NKP 2.19.1**. Online, or **fully offline** from one public bundle |
+| # | Lab | Scope | What you learn |
+|---|---|---|---|
+| 00 | [00-prereqs](00-prereqs/) | Cluster | a namespace, a **ReadWriteMany StorageClass**, an ingress class, a **domain/DNS** (+ optional default TLS cert) |
+| 01 | [01-pvc-rwx-busybox](01-pvc-rwx-busybox/) | Cluster | a **ReadWriteMany** volume shared by **two pods** (writer + reader) |
+| 02 | [02-apache-rwx-multireplica](02-apache-rwx-multireplica/) | Cluster | one html volume served by **N replicas**, with **two containers in the same pod** sharing it |
+| 03 | [03-apache-metallb](03-apache-metallb/) | Cluster | expose a Service with `type: LoadBalancer` (an external IP, e.g. MetalLB) |
+| 04 | [04-apache-traefik-ingress](04-apache-traefik-ingress/) | Cluster | route a **hostname → Service** through the cluster ingress controller |
+| 05 | [05-nkp-appdeployment](05-nkp-appdeployment/) | Cluster | deploy an application the **NKP way** (`AppDeployment` + config overrides) |
+| 06 | [06-long-lived-token-kubeconfig](06-long-lived-token-kubeconfig/) | Cluster | a **long-lived ServiceAccount token** + a ready **kubeconfig** for an app/CI (least privilege) |
+| 07 | [07-velero-bsl](07-velero-bsl/) | Cluster | configure a **Velero Backup Storage Location (BSL)** (UI + CLI), write **backup policies** (`Schedule`s), **back up & restore a persistent app** (volumes), + the Velero/NKP **CRDs** |
+| 08 | [08-splunk-otel-helm](08-splunk-otel-helm/) | Cluster | install the **Splunk OpenTelemetry Collector** with **plain `helm`** (no catalog) — every setting explained, **logs + metrics** to Splunk over HEC, and **troubleshooting** |
+| 09 | [09-traefik-oidc-okta](09-traefik-oidc-okta/) | Cluster | protect an app with **Okta OIDC** using the **Traefik OIDC plugin middleware** — a hands-on lab with a **page per step** (`steps/01…10`), no oauth2-proxy, no Dex |
+| 10 | [10-vault-install](10-vault-install/) | Cluster | install **HashiCorp Vault** (dev / standalone / HA), **initialize + unseal** it, enable a **KV v2** engine and reach the UI — the prerequisite for lab 11 |
+| 11 | [11-vault-eso](11-vault-eso/) | Cluster | pull a secret from **Vault** with the **External Secrets Operator** — the **`ClusterSecretStore`** (the "credential store") set via an **NKP `AppDeployment` override** (`extraObjects`), so it is **visible/editable in the UI** |
+| 12 | [12-bootstrap-machine](12-bootstrap-machine/) | Jump host / Prism | paste a **Prism cloud-init** that builds the **Ubuntu jump host**, configure the **Prism Central IAM v4 role**, and install **self-managed NKP 2.19.1** (online or fully offline) |
 
 ## Lab 12 — bootstrap machine
 
-This lab does not apply manifests to a cluster you already have. It builds the machine that creates
-the cluster. Full steps: [12-bootstrap-machine](12-bootstrap-machine/).
+Unlike Labs 00–11, Lab 12 builds the Ubuntu 24.04 jump host that deploys the NKP cluster. See
+[12-bootstrap-machine/README.md](12-bootstrap-machine/README.md) for the complete guide, version pin
+file ([`versions.env`](12-bootstrap-machine/versions.env)), and step-by-step docs.
 
-Two ways to boot the VM. Both set the hostname, the `ubuntu` password, and SSH. Paste the YAML into
-Prism. Do not base64-encode it.
-
-| | Online | Offline (no internet on the VM) |
+| Mode | Cloud-init (paste into Prism, no base64) | Updating later |
 |---|---|---|
-| Paste | [cloud-init.yaml](https://raw.githubusercontent.com/fernandoquinino-ntx/nkp-labs/main/12-bootstrap-machine/cloud-init.yaml) | [cloud-init-offline.yaml](https://raw.githubusercontent.com/fernandoquinino-ntx/nkp-labs/main/12-bootstrap-machine/cloud-init-offline.yaml) |
-| Installers come from | the internet, retried, resumed after a reboot | one file you copy with `scp` |
-| Later fixes | `nkp-update` pulls the latest scripts from this repo | push a new bundle. Your `env`, values, and kubeconfigs stay |
+| **Online** | [cloud-init.yaml](https://raw.githubusercontent.com/fernandoquinino-ntx/nkp-labs/main/12-bootstrap-machine/cloud-init.yaml) | `nkp-update` (`--status`, `--check`, `--rollback`) |
+| **Offline** | [cloud-init-offline.yaml](https://raw.githubusercontent.com/fernandoquinino-ntx/nkp-labs/main/12-bootstrap-machine/cloud-init-offline.yaml) | `update-bastion.sh` / `update-bastion.ps1` or `nkp-update --from-tarball` |
 
-**One public bundle, no GitHub login.** CI builds it on every change to this lab, installs it in
-Ubuntu 24.04 with the network turned off, and publishes the release:
-
-https://github.com/fernandoquinino-ntx/nkp-labs/releases/tag/offline-bundle
-
-```bash
-./12-bootstrap-machine/scripts/get-offline-bundle.sh
-```
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\12-bootstrap-machine\scripts\get-offline-bundle.ps1
-```
-
-```powershell
-scp dist\nkp-bootstrap-offline-v2.19.1-noble-amd64.tar.gz ubuntu@<vm-ip>:/home/ubuntu/
-```
-
-That 578 MB file is the whole toolchain. Nothing else is downloaded on the VM.
-
-| Inside the file | What |
-|---|---|
-| `downloads/` | nkp v2.19.1, kubectl v1.36.2, Helm v3.22.1, Flux v2.10.0, k9s, yq. Static binaries, no extra libraries |
-| 370 `.deb` packages | Ubuntu 24.04 packages, Docker Engine, and their dependencies (`libc6`, `openssl`, OpenSSH, …) |
-| `images/registry-2.tar` | the local registry image, saved with `docker save` |
-| `labs/` | this lab: both install paths, the Helm charts, the registry scripts |
-
-The VM unpacks it, checks every file, and continues after a reboot from the first unfinished step.
-`nkp-bootstrap-status` shows where it is. The log is `/var/log/nkp-bootstrap.log`.
-
-**Prism Central IAM v4 Role for NKP 2.19:** create or update the least-privileged NKP master role
-and Authorization Policy from Windows PowerShell (`create-prism-role.ps1`) or Linux/macOS
-(`create-prism-role.py`) — see [Step 08 — Prism Central role](12-bootstrap-machine/steps/08-prism-central-role.md).
-
-**Then install the cluster**, from `/home/ubuntu/nkp-workspace`, by either path:
-
-| Path | Command | From |
-|---|---|---|
-| Helm | `./scripts/install-nkp.sh` | kind bootstrap, chart, kubeconfig, pivot, optional Kommander |
-| CLI | `./scripts/create-cluster.sh` | `nkp create cluster nutanix --self-managed` |
-
-Use one path for a given cluster name. A TLS registry on the jump host
-(`./scripts/setup-local-registry.sh`) and the trust secret for the cluster are in
-[step 06](12-bootstrap-machine/steps/06-airgap-registry.md). The 33 GB NKP air-gapped bundle is
-separate. It is not inside the 578 MB file.
+- **Public offline bundle (no GitHub login):** built and tested offline in CI, published with
+  per-asset `.sha256` checksums and `MANIFEST.json` at
+  [releases/tag/offline-bundle](https://github.com/fernandoquinino-ntx/nkp-labs/releases/tag/offline-bundle).
+  Download with `./12-bootstrap-machine/scripts/get-offline-bundle.sh` (or `.ps1` on Windows).
+  *(The ~33 GB NKP air-gapped image bundle is separate; see
+  [Step 06](12-bootstrap-machine/steps/06-airgap-registry.md).)*
+- **Prism Central IAM v4 Role for NKP 2.19:** create or update the least-privileged NKP master role
+  and Authorization Policy from Windows PowerShell (`create-prism-role.ps1`) or Linux/macOS
+  (`create-prism-role.py`) — see [Step 08](12-bootstrap-machine/steps/08-prism-central-role.md).
+- **Install paths** (from `/home/ubuntu/nkp-workspace`): `./scripts/install-nkp.sh` (Helm) or
+  `./scripts/create-cluster.sh` (CLI). Use one path per cluster name.
 
 ## Procedures (step-by-step, copy-paste)
 
@@ -173,6 +137,12 @@ scripts/            # render.sh, apply.sh, cleanup.sh, dns-add.sh
 rendered/           # generated (gitignored)
 00-prereqs/ … 12-bootstrap-machine/
 ```
+
+## Security, Changelog & CI
+
+- **Security policy:** [SECURITY.md](SECURITY.md)
+- **Changelog:** [CHANGELOG.md](CHANGELOG.md)
+- **CI quality & tests:** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (ShellCheck, PowerShell AST/PSScriptAnalyzer, 7-scenario Prism Central mock tests, lab render + Helm lint, `gitleaks`)
 
 ## License
 MIT (or your choice).

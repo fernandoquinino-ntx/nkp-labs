@@ -1,8 +1,9 @@
 name: offline-bundle
 
 # Builds the lab 12 offline bootstrap bundle (installers, Ubuntu 24.04 packages, registry
-# image, lab snapshot) and proves it installs with no network before uploading it.
-# Download the latest one on a client with: 12-bootstrap-machine/scripts/get-offline-bundle.sh
+# image, lab snapshot), proves it installs with no network, and updates the public
+# offline-bundle release atomically (--clobber, zero 404 downtime) with SHA256 checksums
+# and MANIFEST.json for every published asset.
 
 on:
   workflow_dispatch:
@@ -28,7 +29,15 @@ jobs:
       - name: cloud-init-offline.yaml matches cloud-init.yaml
         run: bash 12-bootstrap-machine/scripts/make-offline-cloud-init.sh --check
 
-      - name: Build the offline bundle
+      - name: Cache offline bundle downloads
+        uses: actions/cache@v4
+        with:
+          path: dist/.cache
+          key: offline-cache-${{ hashFiles('12-bootstrap-machine/versions.env', '12-bootstrap-machine/scripts/bootstrap-host.sh', '12-bootstrap-machine/scripts/build-offline-bundle.sh') }}
+          restore-keys: |
+            offline-cache-
+
+      - name: Build the offline bundle and release assets
         id: build
         env:
           NKP_FALLBACK_BUNDLE_URL: https://github.com/${{ github.repository }}/releases/download/offline-bundle/nkp-bootstrap-offline-v2.19.1-noble-amd64.tar.gz
@@ -40,6 +49,41 @@ jobs:
           cp 12-bootstrap-machine/scripts/update-bastion.sh dist/update-bastion.sh
           cp 12-bootstrap-machine/scripts/update-bastion.ps1 dist/update-bastion.ps1
           cp 12-bootstrap-machine/scripts/create-prism-role.ps1 dist/create-prism-role.ps1
+          cp 12-bootstrap-machine/scripts/create-prism-role.py dist/create-prism-role.py
+
+          # Generate per-asset .sha256 files and MANIFEST.json for verified auto-update
+          (
+            cd dist
+            for asset in \
+              cloud-init-offline.yaml \
+              nkp-labs-update.tar.gz \
+              update-bastion.sh \
+              update-bastion.ps1 \
+              create-prism-role.ps1 \
+              create-prism-role.py; do
+              sha256sum "${asset}" > "${asset}.sha256"
+            done
+          )
+          python3 - "$PWD/dist" "$GITHUB_SHA" <<'PY'
+          import datetime, hashlib, json, os, sys
+          dist, sha = sys.argv[1], sys.argv[2]
+          assets = {}
+          for fn in sorted(os.listdir(dist)):
+              full = os.path.join(dist, fn)
+              if not os.path.isfile(full) or fn == "MANIFEST.json" or fn.endswith(".sha256"):
+                  continue
+              h = hashlib.sha256(open(full, "rb").read()).hexdigest()
+              assets[fn] = {"sha256": h, "size": os.path.getsize(full)}
+          manifest = {
+              "git_sha": sha[:12],
+              "git_sha_full": sha,
+              "built_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "assets": assets,
+          }
+          with open(os.path.join(dist, "MANIFEST.json"), "w", encoding="utf-8") as fh:
+              json.dump(manifest, fh, indent=2)
+              fh.write("\n")
+          PY
 
       - name: Install it in Ubuntu 24.04 with no network
         run: bash 12-bootstrap-machine/scripts/verify-offline-bundle.sh "dist/${{ steps.build.outputs.name }}.tar.gz"
@@ -51,24 +95,43 @@ jobs:
             dist/${{ steps.build.outputs.name }}.tar.gz
             dist/${{ steps.build.outputs.name }}.tar.gz.sha256
             dist/cloud-init-offline.yaml
+            dist/MANIFEST.json
           retention-days: 30
           compression-level: 0
           if-no-files-found: error
 
-      - name: Publish the bundle on the public offline-bundle release
+      - name: Publish assets atomically on the public offline-bundle release (zero-downtime)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           name="${{ steps.build.outputs.name }}"
-          gh release delete offline-bundle --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
-          gh release create offline-bundle \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "NKP offline bootstrap bundle" \
-            --notes "Built from ${GITHUB_SHA}. Download needs no login." \
-            "dist/${name}.tar.gz" \
-            "dist/${name}.tar.gz.sha256" \
-            dist/cloud-init-offline.yaml \
-            dist/nkp-labs-update.tar.gz \
-            dist/update-bastion.sh \
-            dist/update-bastion.ps1 \
+          notes="Built from ${GITHUB_SHA}. Verified offline install on Ubuntu 24.04. Download needs no login."
+          assets=(
+            "dist/${name}.tar.gz"
+            "dist/${name}.tar.gz.sha256"
+            dist/cloud-init-offline.yaml
+            dist/cloud-init-offline.yaml.sha256
+            dist/nkp-labs-update.tar.gz
+            dist/nkp-labs-update.tar.gz.sha256
+            dist/update-bastion.sh
+            dist/update-bastion.sh.sha256
+            dist/update-bastion.ps1
+            dist/update-bastion.ps1.sha256
             dist/create-prism-role.ps1
+            dist/create-prism-role.ps1.sha256
+            dist/create-prism-role.py
+            dist/create-prism-role.py.sha256
+            dist/MANIFEST.json
+          )
+          if gh release view offline-bundle --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload offline-bundle --repo "$GITHUB_REPOSITORY" --clobber "${assets[@]}"
+            gh release edit offline-bundle --repo "$GITHUB_REPOSITORY" \
+              --title "NKP offline bootstrap bundle" \
+              --notes "${notes}"
+          else
+            gh release create offline-bundle \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "NKP offline bootstrap bundle" \
+              --notes "${notes}" \
+              "${assets[@]}"
+          fi

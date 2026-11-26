@@ -104,6 +104,8 @@ powershell -ExecutionPolicy Bypass -File .\create-prism-role.ps1 `
 | `-PcVersion` | `auto` | Override Prism Central version detection (`auto`, `7.6`, `7.5`, `7.3`, `2024.3`) |
 | `-ApiVersion` | `auto` | Override IAM v4 API version (`v4.0`, `v4.1`, `v4.1.b3`, `v4.0.b1`, ...) |
 | `-PrintOnly` | `$false` | Dry-run: list matched + auto-resolved operations without creating/updating anything |
+| `-CheckUpdate` | `$false` | Check the public `offline-bundle` release SHA-256 against the local script and exit |
+| `-SelfUpdate` | `$false` | Download the latest release script, verify SHA-256 + PowerShell syntax, back up `.bak`, and replace atomically |
 
 ---
 
@@ -159,6 +161,27 @@ PRISM_PASSWORD='<admin-password>' \
 | `PRISM_PC_VERSION` | *(auto-detected)* | Override PC version (`7.5`, `7.3`, `2024.3`, ...) |
 | `PRISM_IAM_VERSION` | *(auto-detected)* | Override IAM API version (`v4.0`, `v4.1.b3`, `v4.0.b1`, ...) |
 | `PRISM_INSECURE` | `true` | Skip TLS verification for self-signed PC certs (`false` to enforce) |
+
+---
+
+## Self-Updating the Standalone Script (SHA-256 Verified)
+
+If you downloaded `create-prism-role.ps1` or `create-prism-role.py` directly without cloning the
+repository, you can check for updates and self-update safely in place. Both scripts fetch the
+expected SHA-256 digest from the public `offline-bundle` release (`MANIFEST.json` / `.sha256`),
+validate syntax before replacing, and save a `.bak` copy of your previous file:
+
+```powershell
+# Windows PowerShell
+powershell -ExecutionPolicy Bypass -File .\create-prism-role.ps1 -CheckUpdate
+powershell -ExecutionPolicy Bypass -File .\create-prism-role.ps1 -SelfUpdate
+```
+
+```bash
+# Linux / macOS / Bastion
+./scripts/create-prism-role.py --check-update
+./scripts/create-prism-role.py --self-update
+```
 
 ---
 

@@ -5,12 +5,16 @@
 
 ```mermaid
 flowchart LR
-  A["cloud-init copies this lab"] --> B["Helm path<br/>scripts/install-nkp.sh"]
-  A --> C["CLI path<br/>scripts/create-cluster.sh"]
+  S1["01 Image & VM"] --> S2["02 Cloud-init<br/>(online or 07 offline)"]
+  S2 --> S8["08 Prism Central<br/>IAM v4 Role"]
+  S8 --> S6["06 Local Registry<br/>(air-gap optional)"]
+  S6 --> S3["03 Helm path<br/>scripts/install-nkp.sh"]
+  S6 --> S5["05 CLI path<br/>scripts/create-cluster.sh"]
+  S3 --> S4["04 Kommander"]
 ```
 
-Cloud-init clones this repository and copies **this folder** to `/home/ubuntu/nkp-workspace` on the VM.
-Both scripts are in that copy.
+Cloud-init clones this repository (or unpacks the offline bundle) and copies **this folder** to
+`/home/ubuntu/nkp-workspace` on the VM. Both install scripts are in that copy.
 
 ## Quick run
 
@@ -40,20 +44,41 @@ Use one path for a given cluster name.
 |---|---|---|
 | 01 | [Image and VM](steps/01-image-and-vm.md) | download the Ubuntu qcow2, size the VM, set the Prism name |
 | 02 | [Cloud-init](steps/02-cloud-init.md) | paste `cloud-init.yaml`, set the password and SSH key |
+| 08 | [Prism Central role](steps/08-prism-central-role.md) | create or update the least-privileged NKP 2.19 IAM v4 role & Authorization Policy (`create-prism-role.ps1` / `.py`) |
+| 06 | [Air gap and registry](steps/06-airgap-registry.md) | *(optional / air-gapped)* download the 33 GB bundle and run a TLS registry the cluster trusts |
+| 07 | [Offline bootstrap](steps/07-offline-bootstrap.md) | *(optional / no internet VM)* get the CI bundle on a client, push it, install from it |
 | 03 | [Helm path](steps/03-install-cluster.md) | fill `values.local.yaml` and run `scripts/install-nkp.sh` |
 | 04 | [Kommander](steps/04-kommander.md) | turn on `INSTALL_KOMMANDER` and the Docker Hub secret |
 | 05 | [`nkp create cluster`](steps/05-create-cluster.md) | fill `create-cluster.env` and run `scripts/create-cluster.sh` |
-| 06 | [Air gap and registry](steps/06-airgap-registry.md) | download the offline bundle and run a TLS registry the cluster trusts |
-| 07 | [Offline bootstrap](steps/07-offline-bootstrap.md) | VM without internet: get the CI bundle on a client, push it, install from it |
-| 08 | [Prism Central role](steps/08-prism-central-role.md) | create or update the least-privileged NKP 2.19 IAM v4 role & Authorization Policy (`create-prism-role.ps1` / `.py`) |
+
+## Updating scripts & rollback (Auto-Update v2)
+
+All update paths preserve your local `env`, `values.local.yaml`, `create-cluster.env`, kubeconfigs,
+`airgap/`, and registry certs:
+
+- **Online jump host (`nkp-update`):**
+  - `nkp-update --status` — show installed commit/release version and rollback availability
+  - `nkp-update --check` — check if a newer release is available without modifying files
+  - `nkp-update` — download latest release tarball (or `main`), back up current scripts to `/var/backups/nkp-workspace/prev`, update `nkp-workspace` and `/usr/local/lib/nkp-bootstrap/`, and enforce `chmod +x` on `*.sh` and `*.py`
+  - `nkp-update --from-tarball /path/to/nkp-labs-update.tar.gz` — offline update on an air-gapped jump host
+  - `nkp-update --rollback` — restore the previous backup
+  - `nkp-update --rerun` — re-run `bootstrap-host.sh` after updating
+- **Push from a workstation to an air-gapped jump host:**
+  - Linux/macOS: `./scripts/update-bastion.sh ubuntu@<bastion-ip>` (`--dry-run`, `--rollback`)
+  - Windows PowerShell: `.\scripts\update-bastion.ps1 -Target ubuntu@<bastion-ip>` (`-DryRun`, `-Rollback`)
+  - Downloads the SHA-256 verified `nkp-labs-update.tar.gz` once, transfers a single tarball over SSH/SCP, verifies checksum, backs up previous scripts, updates `nkp-workspace` + `/usr/local/lib/nkp-bootstrap/`, and sets `+x` on `*.sh` and `*.py`.
+- **Standalone Prism Central role scripts:**
+  - Windows PowerShell: `.\create-prism-role.ps1 -CheckUpdate` / `-SelfUpdate`
+  - Linux/macOS: `./scripts/create-prism-role.py --check-update` / `--self-update`
 
 ## Files
 
 | File | What |
 |---|---|
+| `versions.env` | single source of truth for NKP, kubectl, Helm, Flux, k9s, yq, and `registry:2` versions (sourced by `bootstrap-host.sh`, checked by CI) |
 | `cloud-init.yaml` | Prism guest customization. A loader for `nkp-bootstrap.service` that downloads the latest `scripts/bootstrap-host.sh` on every run. `nkp-bootstrap-status` shows progress |
 | `scripts/bootstrap-host.sh` | the host install: packages, disk grow, Docker, CLIs, workspace, registry image. Resumes after a failure or a restart |
-| `scripts/update-workspace.sh` | `nkp-update` on the VM. Pulls the latest lab into `nkp-workspace` without touching your files. `--rerun` runs the bootstrap again |
+| `scripts/update-workspace.sh` | `nkp-update` on the VM (`--status`, `--check`, `--from-tarball`, `--rollback`, `--rerun`). Never overwrites local env/config/kubeconfig files |
 | `scripts/expand-root-disk.sh` | grows the root partition or LV. Safe to run again |
 | `cloud-init-offline.yaml` | the same paste with `NKP_MODE=offline`: no internet on the VM. Generated by `scripts/make-offline-cloud-init.sh` |
 | `scripts/get-offline-bundle.sh` | client: download the latest CI offline bundle (or build it here). `get-offline-bundle.ps1` is the same command for Windows PowerShell |
@@ -72,10 +97,12 @@ Use one path for a given cluster name.
 | `scripts/fetch-airgap-bundle.sh` | download the 2.19.1 air-gapped bundle (~33 GiB). Resumes, checks the size, writes `.complete`. Run by `nkp-airgap-download.service`. Log: `/var/log/nkp-bootstrap.log` |
 | `scripts/setup-local-registry.sh` | self-signed CA, registry certificate, `registry:2` on this host (bcrypt auth + Docker CA trust by host and IP) |
 | `scripts/trust-registry.sh` | Opaque Secret `username` / `password` / `ca.crt` for CAREN |
-| `scripts/create-prism-role.ps1` | Windows PowerShell 5.1+/7+: creates or updates in-place the NKP 2.19 master Prism Central IAM v4 role (294 ops + correlated `View` safeguard + recursive `relatedOperationList`) and Authorization Policy, with optional 8-endpoint live check. Guide: [08](steps/08-prism-central-role.md) |
-| `scripts/create-prism-role.py` | Linux/macOS Python 3 equivalent of `create-prism-role.ps1`. Guide: [08](steps/08-prism-central-role.md) |
-| `scripts/update-bastion.sh` | Linux/macOS: pushes latest lab files from `main` to an air-gapped bastion without touching local env/registry/airgap data |
-| `scripts/update-bastion.ps1` | Windows PowerShell equivalent of `update-bastion.sh` |
+| `scripts/create-prism-role.ps1` | Windows PowerShell 5.1+/7+: creates or updates in-place the NKP 2.19 master Prism Central IAM v4 role (294 ops + correlated `View` safeguard + recursive `relatedOperationList`) and Authorization Policy, with `-CheckUpdate`/`-SelfUpdate` and optional 8-endpoint live check. Guide: [08](steps/08-prism-central-role.md) |
+| `scripts/create-prism-role.py` | Linux/macOS Python 3 equivalent of `create-prism-role.ps1`, with `--check-update`/`--self-update`. Guide: [08](steps/08-prism-central-role.md) |
+| `scripts/update-bastion.sh` | Linux/macOS: SHA-256 verified tarball update to an air-gapped bastion (`--dry-run`, `--rollback`) without touching local env/registry/airgap data |
+| `scripts/update-bastion.ps1` | Windows PowerShell equivalent of `update-bastion.sh` (`-DryRun`, `-Rollback`) |
+| `tests/test_prism_role.py` | 7-scenario local HTTPS mock test suite for `create-prism-role.py` and `create-prism-role.ps1` (runs in CI) |
+| `tests/test_repo_hygiene.py` | Repo hygiene checks: Markdown links, `+x` & LF line endings, `versions.env` sync, `render.sh` YAML validation (runs in CI) |
 | `helm-charts/nkp-cluster/` | `NKPCluster` plus Prism secrets |
 | `helm-charts/nkp-kommander/` | Kommander installer ConfigMap and the Docker Hub secret |
 
@@ -99,7 +126,9 @@ Use one path for a given cluster name.
 | What | URL |
 |---|---|
 | This lab | https://github.com/fernandoquinino-ntx/nkp-labs/tree/main/12-bootstrap-machine |
+| Offline bundle release & `MANIFEST.json` | https://github.com/fernandoquinino-ntx/nkp-labs/releases/tag/offline-bundle |
 | Prism Central role script (Windows PS1) | https://github.com/fernandoquinino-ntx/nkp-labs/releases/download/offline-bundle/create-prism-role.ps1 |
+| Prism Central role script (Linux/macOS Python) | https://github.com/fernandoquinino-ntx/nkp-labs/releases/download/offline-bundle/create-prism-role.py |
 | Cloud-init (raw, paste into Prism) | https://raw.githubusercontent.com/fernandoquinino-ntx/nkp-labs/main/12-bootstrap-machine/cloud-init.yaml |
 | Cloud-init offline (raw) | https://raw.githubusercontent.com/fernandoquinino-ntx/nkp-labs/main/12-bootstrap-machine/cloud-init-offline.yaml |
 | Ubuntu 24.04 amd64 cloud image | https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img |

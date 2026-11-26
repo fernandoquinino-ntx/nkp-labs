@@ -704,7 +704,85 @@ def update_resource(prism, url_path, label, body):
         raise SystemExit(f"update {label} failed ({status}): {format_error(payload)}")
 
 
+def handle_self_update(apply_update):
+    import hashlib
+    import shutil
+
+    repo = os.environ.get("NKP_LABS_GH_REPO", "fernandoquinino-ntx/nkp-labs")
+    release_base = os.environ.get(
+        "NKP_LABS_RELEASE_BASE",
+        f"https://github.com/{repo}/releases/download/offline-bundle",
+    ).rstrip("/")
+    script_path = os.path.abspath(__file__)
+    with open(script_path, "rb") as fh:
+        local_hash = hashlib.sha256(fh.read()).hexdigest().lower()
+
+    insecure = os.environ.get("PRISM_INSECURE", "true").lower() != "false"
+    ctx = ssl._create_unverified_context() if insecure else ssl.create_default_context()
+
+    def fetch_bytes(url):
+        req = urllib.request.Request(url, headers={"User-Agent": "nkp-labs-self-update/1.0"})
+        with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
+            return resp.read()
+
+    remote_hash = None
+    remote_sha = ""
+    try:
+        mf = json.loads(fetch_bytes(f"{release_base}/MANIFEST.json").decode("utf-8"))
+        remote_sha = str(mf.get("git_sha") or "")
+        asset = (mf.get("assets") or {}).get("create-prism-role.py") or {}
+        if asset.get("sha256"):
+            remote_hash = str(asset["sha256"]).lower()
+    except Exception:
+        pass
+    if not remote_hash:
+        sum_txt = fetch_bytes(f"{release_base}/create-prism-role.py.sha256").decode("utf-8")
+        remote_hash = sum_txt.split()[0].strip().lower()
+    if not re.match(r"^[0-9a-f]{64}$", remote_hash):
+        raise SystemExit(f"Invalid remote sha256 checksum: {remote_hash}")
+
+    commit_note = f", commit={remote_sha}" if remote_sha else ""
+    if local_hash == remote_hash:
+        print(f"create-prism-role.py is up-to-date (sha256={local_hash[:12]}{commit_note})")
+        return
+    print(
+        f"Update available for create-prism-role.py "
+        f"(local={local_hash[:12]}, remote={remote_hash[:12]}{commit_note})"
+    )
+    if not apply_update:
+        return
+
+    raw = fetch_bytes(f"{release_base}/create-prism-role.py")
+    got_hash = hashlib.sha256(raw).hexdigest().lower()
+    if got_hash != remote_hash:
+        raise SystemExit(
+            f"Downloaded create-prism-role.py sha256 mismatch (expected {remote_hash}, got {got_hash}). Aborting."
+        )
+    try:
+        compile(raw.decode("utf-8"), script_path, "exec")
+    except SyntaxError as exc:
+        raise SystemExit(f"Downloaded create-prism-role.py failed syntax check: {exc}")
+
+    tmp_path = script_path + ".new"
+    try:
+        with open(tmp_path, "wb") as fh:
+            fh.write(raw)
+        os.chmod(tmp_path, 0o755)
+        shutil.copy2(script_path, script_path + ".bak")
+        os.replace(tmp_path, script_path)
+        print(f"Updated {script_path} successfully (sha256={got_hash[:12]}, backup at {script_path}.bak)")
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
 def main():
+    if "--self-update" in sys.argv:
+        handle_self_update(apply_update=True)
+        return
+    if "--check-update" in sys.argv:
+        handle_self_update(apply_update=False)
+        return
     print_only = "--print" in sys.argv
     endpoint = os.environ.get("PRISM_ENDPOINT", "")
     user = os.environ.get("PRISM_USER", "")

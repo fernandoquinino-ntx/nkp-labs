@@ -1,0 +1,109 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-shell:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check bash syntax on all shell scripts
+        run: |
+          mapfile -t scripts < <(find . -name '*.sh' -not -path './.git/*' | sort)
+          echo "Checking ${#scripts[@]} shell scripts with bash -n"
+          for s in "${scripts[@]}"; do
+            bash -n "$s"
+          done
+
+      - name: Run ShellCheck (errors & warnings)
+        run: |
+          mapfile -t scripts < <(find . -name '*.sh' -not -path './.git/*' | sort)
+          shellcheck -S error "${scripts[@]}"
+
+  lint-powershell:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Parse all PowerShell scripts with PowerShell AST
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem -Recurse -Filter '*.ps1'
+          foreach ($f in $files) {
+              $tokens = $null; $errs = $null
+              $null = [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$tokens, [ref]$errs)
+              if ($errs.Count -gt 0) {
+                  $errs | ForEach-Object { Write-Error "$($f.FullName): $_" }
+                  exit 1
+              }
+              Write-Host "AST OK: $($f.Name)"
+          }
+
+      - name: Run PSScriptAnalyzer (Error severity)
+        shell: pwsh
+        run: |
+          Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser -ErrorAction Stop
+          $findings = Invoke-ScriptAnalyzer -Path 12-bootstrap-machine/scripts -IncludeRule * -Severity Error
+          if ($findings) {
+              $findings | Format-Table -AutoSize
+              exit 1
+          }
+          Write-Host "PSScriptAnalyzer OK (0 errors)"
+
+  test-prism-role:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Run 7-scenario HTTPS mock suite (create-prism-role.ps1 + .py)
+        run: python3 12-bootstrap-machine/tests/test_prism_role.py
+
+  test-labs-and-hygiene:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Ensure PyYAML is available
+        run: python3 -c "import yaml" 2>/dev/null || pip3 install --break-system-packages pyyaml
+
+      - name: Run repo hygiene, Markdown link, version-drift, and lab render tests
+        run: python3 12-bootstrap-machine/tests/test_repo_hygiene.py
+
+      - name: Verify cloud-init-offline.yaml matches cloud-init.yaml
+        run: bash 12-bootstrap-machine/scripts/make-offline-cloud-init.sh --check
+
+      - name: Lint and template Lab 12 Helm charts
+        run: |
+          helm lint 12-bootstrap-machine/helm-charts/nkp-cluster
+          helm lint 12-bootstrap-machine/helm-charts/nkp-kommander
+          helm template test-cluster 12-bootstrap-machine/helm-charts/nkp-cluster \
+            -f 12-bootstrap-machine/values.example.yaml >/dev/null
+          helm template test-kommander 12-bootstrap-machine/helm-charts/nkp-kommander >/dev/null
+
+  security-scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Scan repository for leaked secrets with gitleaks
+        run: |
+          GITLEAKS_VER="8.24.2"
+          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VER}/gitleaks_${GITLEAKS_VER}_linux_x64.tar.gz" \
+            | tar -xz -C /tmp gitleaks
+          /tmp/gitleaks detect --source . --no-git --redact --verbose
