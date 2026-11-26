@@ -110,11 +110,31 @@ powershell -ExecutionPolicy Bypass -File .\create-prism-role.ps1 `
 
 ---
 
-## Option B — Linux / macOS / Bastion (`create-prism-role.py`)
+## Option B — macOS / Linux / Bastion (`create-prism-role.py`)
 
-Uses Python 3 standard library only (no `pip install` needed).
+Uses Python 3 standard library only (no `pip install` needed). When run in a terminal without
+environment variables, it prompts interactively (with masked password input) just like
+`create-prism-role.ps1`.
 
-### 1. Create or update the role and Authorization Policy
+### 1. Download and run interactively (recommended on macOS / Linux)
+
+```bash
+curl -fsSL https://github.com/fernandoquinino-ntx/nkp-labs/releases/download/offline-bundle/create-prism-role.py \
+  -o create-prism-role.py
+chmod +x create-prism-role.py
+
+./create-prism-role.py
+```
+
+The script prompts for:
+
+- **Prism Central IP or URL** (e.g. `10.0.0.10` or `https://10.0.0.10:9440`)
+- **Role name** (default: `NKP Cluster Create`)
+- **NKP user** (must already exist in Prism Central)
+- **Prism Central admin user** (default: `admin`) and **password** (masked input)
+- **Optional NKP user password** to run the live 8-endpoint API verification (press Enter to skip)
+
+### 2. Non-interactive mode (CI / automation with environment variables)
 
 ```bash
 cd 12-bootstrap-machine
@@ -122,41 +142,26 @@ PRISM_ENDPOINT="https://10.0.0.10:9440" \
 PRISM_USER="admin" \
 PRISM_PASSWORD='<admin-password>' \
 NKP_PC_USER="nkp-service-user" \
-NKP_ROLE_NAME="NKP Cluster Create" \
-./scripts/create-prism-role.py
-```
-
-### 2. Run with live 8-endpoint NKP user verification
-
-Add `NKP_PC_PASSWORD`:
-
-```bash
-PRISM_ENDPOINT="https://10.0.0.10:9440" \
-PRISM_USER="admin" \
-PRISM_PASSWORD='<admin-password>' \
-NKP_PC_USER="nkp-service-user" \
 NKP_PC_PASSWORD='<nkp-user-password>' \
+NKP_ROLE_NAME="NKP Cluster Create" \
 ./scripts/create-prism-role.py
 ```
 
 ### 3. Dry-run preview (`--print`)
 
 ```bash
-PRISM_ENDPOINT="https://10.0.0.10:9440" \
-PRISM_USER="admin" \
-PRISM_PASSWORD='<admin-password>' \
-./scripts/create-prism-role.py --print
+./create-prism-role.py --print
 ```
 
-### Python environment variables
+### Python environment variables (all optional when running interactively)
 
 | Variable | Default | Description |
 |---|---|---|
-| `PRISM_ENDPOINT` | *(required)* | Prism Central IP, hostname, or URL |
-| `PRISM_USER` | *(required)* | Prism Central admin username |
-| `PRISM_PASSWORD` | *(required)* | Prism Central admin password |
-| `NKP_PC_USER` | *(required unless `--print`)* | Existing Prism Central user for NKP |
-| `NKP_PC_PASSWORD` | *(optional)* | Enables the 8-endpoint live API verification as `NKP_PC_USER` |
+| `PRISM_ENDPOINT` | *(prompted)* | Prism Central IP, hostname, or URL (`:9440` added automatically if omitted) |
+| `PRISM_USER` | `admin` *(prompted)* | Prism Central admin username |
+| `PRISM_PASSWORD` | *(masked prompt)* | Prism Central admin password |
+| `NKP_PC_USER` | *(prompted unless `--print`)* | Existing Prism Central user for NKP |
+| `NKP_PC_PASSWORD` | *(optional masked prompt)* | Enables the 8-endpoint live API verification as `NKP_PC_USER` |
 | `NKP_ROLE_NAME` | `NKP Cluster Create` | Custom role name |
 | `NKP_POLICY_NAME` | `<NKP_ROLE_NAME> policy` | Authorization Policy name |
 | `PRISM_PC_VERSION` | *(auto-detected)* | Override PC version (`7.5`, `7.3`, `2024.3`, ...) |

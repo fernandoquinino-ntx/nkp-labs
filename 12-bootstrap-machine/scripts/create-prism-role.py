@@ -15,16 +15,18 @@ Nutanix CSI 3.9) across Prism Central 2024.x, pc.7.3, pc.7.5, and pc.7.6+:
 
 Does not create the user and does not print passwords.
 
+  ./scripts/create-prism-role.py          # interactive prompts (when run in a terminal)
+  ./scripts/create-prism-role.py --print  # dry-run preview (no changes on Prism Central)
+
   PRISM_ENDPOINT=https://10.0.0.1:9440 \
   PRISM_USER=admin \
   PRISM_PASSWORD='...' \
   NKP_PC_USER=nkp-user \
   ./scripts/create-prism-role.py
-
-  ./scripts/create-prism-role.py --print
 """
 
 from collections import deque
+import getpass
 import json
 import os
 import re
@@ -414,7 +416,11 @@ class Prism:
     def __init__(self, endpoint, user, password, insecure):
         ep = endpoint.strip().rstrip("/")
         if not ep.startswith(("http://", "https://")):
-            ep = f"https://{ep}" if ":" in ep else f"https://{ep}:9440"
+            ep = f"https://{ep}" if re.search(r":\d+$", ep) else f"https://{ep}:9440"
+        else:
+            parsed = urllib.parse.urlparse(ep)
+            if parsed.port is None and parsed.hostname:
+                ep = f"{parsed.scheme}://{parsed.hostname}:9440{parsed.path.rstrip('/')}"
         self.endpoint = ep
         context = ssl._create_unverified_context() if insecure else ssl.create_default_context()
         password_mgr = urllib.request.HTTPPasswordMgrWithPriorAuth()
@@ -862,6 +868,29 @@ def handle_self_update(apply_update, allow_force=False):
             os.remove(tmp_path)
 
 
+def prompt_required(label, default=""):
+    suffix = f" [{default}]" if default else ""
+    try:
+        val = input(f"{label}{suffix}: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        raise SystemExit("\nAborted.")
+    if not val:
+        val = default
+    if not val:
+        raise SystemExit(f"{label} is required.")
+    return val
+
+
+def prompt_secret(label, required=True):
+    try:
+        val = getpass.getpass(f"{label}: ")
+    except (EOFError, KeyboardInterrupt):
+        raise SystemExit("\nAborted.")
+    if required and not val:
+        raise SystemExit(f"{label} is required.")
+    return val
+
+
 def main():
     allow_force = "--force" in sys.argv
     if "--self-update" in sys.argv:
@@ -871,20 +900,45 @@ def main():
         handle_self_update(apply_update=False, allow_force=allow_force)
         return
     print_only = "--print" in sys.argv
-    endpoint = os.environ.get("PRISM_ENDPOINT", "")
-    user = os.environ.get("PRISM_USER", "")
+    interactive = sys.stdin.isatty()
+
+    endpoint = os.environ.get("PRISM_ENDPOINT", "").strip()
+    user = os.environ.get("PRISM_USER", "").strip()
     password = os.environ.get("PRISM_PASSWORD", "")
-    nkp_user = os.environ.get("NKP_PC_USER", "")
+    nkp_user = os.environ.get("NKP_PC_USER", "").strip()
     nkp_password = os.environ.get("NKP_PC_PASSWORD", "")
-    role_name = os.environ.get("NKP_ROLE_NAME", "NKP Cluster Create")
-    policy_name = os.environ.get("NKP_POLICY_NAME", role_name + " policy")
-    iam_pref = os.environ.get("PRISM_IAM_VERSION", "")
-    pc_ver_pref = os.environ.get("PRISM_PC_VERSION", "")
+    role_name = os.environ.get("NKP_ROLE_NAME", "").strip()
+    policy_name = os.environ.get("NKP_POLICY_NAME", "").strip()
+    iam_pref = os.environ.get("PRISM_IAM_VERSION", "").strip()
+    pc_ver_pref = os.environ.get("PRISM_PC_VERSION", "").strip()
     insecure = os.environ.get("PRISM_INSECURE", "true").lower() != "false"
+
+    if interactive:
+        if not endpoint:
+            endpoint = prompt_required("Prism Central IP or URL (e.g. 10.0.0.10)")
+        if not print_only:
+            if not role_name:
+                role_name = prompt_required("Role name", "NKP Cluster Create")
+            if not nkp_user:
+                nkp_user = prompt_required("Existing Prism Central user for NKP")
+        if not user:
+            user = prompt_required("Prism Central admin user", "admin")
+        if not password:
+            password = prompt_secret(f"Password for {user}", required=True)
+        if not print_only and not nkp_password:
+            nkp_password = prompt_secret(
+                f"Optional password for {nkp_user} to run 8-endpoint check (Enter to skip)",
+                required=False,
+            )
+
+    if not role_name:
+        role_name = "NKP Cluster Create"
+    if not policy_name:
+        policy_name = role_name + " policy"
     if not endpoint or not user or not password:
-        raise SystemExit("Set PRISM_ENDPOINT, PRISM_USER, and PRISM_PASSWORD.")
+        raise SystemExit("Set PRISM_ENDPOINT, PRISM_USER, and PRISM_PASSWORD (or run interactively in a terminal).")
     if not print_only and not nkp_user:
-        raise SystemExit("Set NKP_PC_USER to the existing Prism Central user.")
+        raise SystemExit("Set NKP_PC_USER to the existing Prism Central user (or run interactively in a terminal).")
 
     prism = Prism(endpoint, user, password, insecure)
     iam_version = detect_iam_version(prism, iam_pref)
