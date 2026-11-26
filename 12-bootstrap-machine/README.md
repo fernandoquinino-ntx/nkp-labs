@@ -54,22 +54,29 @@ Use one path for a given cluster name.
 ## Updating scripts & rollback (Auto-Update v2)
 
 All update paths preserve your local `env`, `values.local.yaml`, `create-cluster.env`, kubeconfigs,
-`airgap/`, and registry certs:
+`airgap/`, and registry certs, and enforce a **3-previous-versions backward-compatibility check**:
+
+- Before modifying any file, every updater reads the currently installed version (`lab_version` /
+  `SCRIPT_VERSION`), compares it against the target version, and reports whether it is
+  **`BACKWARD-COMPATIBLE`** (same major, up to 3 minor versions behind) or **`NOT BACKWARD-COMPATIBLE`**.
+- Updates up to **3 previous versions behind** proceed automatically. Jumps greater than 3 versions
+  behind (or across major versions) are blocked unless `--force` (Bash/Python) or `-Force`
+  (PowerShell) is explicitly passed.
 
 - **Online jump host (`nkp-update`):**
-  - `nkp-update --status` — show installed commit/release version and rollback availability
-  - `nkp-update --check` — check if a newer release is available without modifying files
-  - `nkp-update` — download latest release tarball (or `main`), back up current scripts to `/var/backups/nkp-workspace/prev`, update `nkp-workspace` and `/usr/local/lib/nkp-bootstrap/`, and enforce `chmod +x` on `*.sh` and `*.py`
-  - `nkp-update --from-tarball /path/to/nkp-labs-update.tar.gz` — offline update on an air-gapped jump host
+  - `nkp-update --status` — show installed version/commit, compatibility window, and rollback availability
+  - `nkp-update --check` — check for newer releases and report backward compatibility (`0` up-to-date, `10` compatible update, `20` incompatible)
+  - `nkp-update` — check 3-version compatibility, back up current scripts to `/var/backups/nkp-workspace/prev`, update `nkp-workspace` and `/usr/local/lib/nkp-bootstrap/`, and enforce `chmod +x` on `*.sh` and `*.py`
+  - `nkp-update --from-tarball /path/to/nkp-labs-update.tar.gz` — offline update on an air-gapped jump host (`--force` to override compatibility guard)
   - `nkp-update --rollback` — restore the previous backup
   - `nkp-update --rerun` — re-run `bootstrap-host.sh` after updating
 - **Push from a workstation to an air-gapped jump host:**
-  - Linux/macOS: `./scripts/update-bastion.sh ubuntu@<bastion-ip>` (`--dry-run`, `--rollback`)
-  - Windows PowerShell: `.\scripts\update-bastion.ps1 -Target ubuntu@<bastion-ip>` (`-DryRun`, `-Rollback`)
-  - Downloads the SHA-256 verified `nkp-labs-update.tar.gz` once, transfers a single tarball over SSH/SCP, verifies checksum, backs up previous scripts, updates `nkp-workspace` + `/usr/local/lib/nkp-bootstrap/`, and sets `+x` on `*.sh` and `*.py`.
+  - Linux/macOS: `./scripts/update-bastion.sh ubuntu@<bastion-ip>` (`--dry-run`, `--rollback`, `--force`)
+  - Windows PowerShell: `.\scripts\update-bastion.ps1 -Target ubuntu@<bastion-ip>` (`-DryRun`, `-Rollback`, `-Force`)
+  - Inspects the bastion's current version first, reports backward compatibility, transfers a single SHA-256 verified `nkp-labs-update.tar.gz`, backs up previous scripts, updates `nkp-workspace` + `/usr/local/lib/nkp-bootstrap/`, and sets `+x` on `*.sh` and `*.py`.
 - **Standalone Prism Central role scripts:**
-  - Windows PowerShell: `.\create-prism-role.ps1 -CheckUpdate` / `-SelfUpdate`
-  - Linux/macOS: `./scripts/create-prism-role.py --check-update` / `--self-update`
+  - Windows PowerShell: `.\create-prism-role.ps1 -CheckUpdate` / `-SelfUpdate` (`-Force`)
+  - Linux/macOS: `./scripts/create-prism-role.py --check-update` / `--self-update` (`--force`)
 
 ## Files
 

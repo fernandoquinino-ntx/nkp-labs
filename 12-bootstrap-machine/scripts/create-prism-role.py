@@ -36,6 +36,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+SCRIPT_VERSION = "1.3.0"
+COMPAT_WINDOW = 3
 IAM_VERSIONS = ["v4.0", "v4.1", "v4.1.b3", "v4.1.b2", "v4.1.b1", "v4.0.b1"]
 
 # (operation display name, min_pc_required: "" | "all" | "7.3" | "7.5")
@@ -704,7 +706,61 @@ def update_resource(prism, url_path, label, body):
         raise SystemExit(f"update {label} failed ({status}): {format_error(payload)}")
 
 
-def handle_self_update(apply_update):
+def check_script_compat(installed, target, window=COMPAT_WINDOW, allow_force=False, apply_mode=False):
+    if not target:
+        return True
+    m_cur = re.match(r"^(\d+)\.(\d+)\.(\d+)$", str(installed).strip())
+    m_tgt = re.match(r"^(\d+)\.(\d+)\.(\d+)$", str(target).strip())
+    if not m_cur or not m_tgt:
+        msg = f"Compatibility check: installed {installed} -> target {target} — NOT BACKWARD-COMPATIBLE (invalid version)."
+        print(msg)
+        if apply_mode and not allow_force:
+            raise SystemExit(f"{msg} Automatic self-update blocked. Pass --force to override.")
+        return allow_force
+    c_maj, c_min = int(m_cur.group(1)), int(m_cur.group(2))
+    t_maj, t_min = int(m_tgt.group(1)), int(m_tgt.group(2))
+    if c_maj != t_maj:
+        msg = f"Compatibility check: installed {installed} -> target {target} (major version mismatch) — NOT BACKWARD-COMPATIBLE."
+        print(msg)
+        if apply_mode:
+            if allow_force:
+                print("WARNING: overriding backward-compatibility guard because --force was specified.", file=sys.stderr)
+                return True
+            raise SystemExit(f"{msg} Automatic self-update blocked. Pass --force to override.")
+        return False
+    delta = t_min - c_min
+    if delta < 0:
+        msg = f"Compatibility check: installed {installed} -> target {target} (downgrade by {-delta} minor version(s)) — NOT BACKWARD-COMPATIBLE."
+        print(msg)
+        if apply_mode:
+            if allow_force:
+                print("WARNING: overriding downgrade guard because --force was specified.", file=sys.stderr)
+                return True
+            raise SystemExit(f"{msg} Automatic self-update blocked. Pass --force to override.")
+        return False
+    if delta <= window:
+        print(
+            f"Compatibility check: installed {installed} -> target {target} "
+            f"({delta} version(s) behind, max allowed: {window}) — BACKWARD-COMPATIBLE."
+        )
+        return True
+    msg = (
+        f"Compatibility check: installed {installed} -> target {target} "
+        f"({delta} version(s) behind, max allowed: {window}) — NOT BACKWARD-COMPATIBLE."
+    )
+    print(msg)
+    if apply_mode:
+        if allow_force:
+            print("WARNING: overriding 3-version backward-compatibility guard because --force was specified.", file=sys.stderr)
+            return True
+        raise SystemExit(
+            f"{msg} Automatic self-update blocked: only up to {window} previous versions are "
+            "guaranteed backward-compatible. Upgrade via an intermediate version or pass --force to override."
+        )
+    return False
+
+
+def handle_self_update(apply_update, allow_force=False):
     import hashlib
     import shutil
 
@@ -727,9 +783,14 @@ def handle_self_update(apply_update):
 
     remote_hash = None
     remote_sha = ""
+    remote_ver = ""
+    remote_window = COMPAT_WINDOW
     try:
         mf = json.loads(fetch_bytes(f"{release_base}/MANIFEST.json").decode("utf-8"))
         remote_sha = str(mf.get("git_sha") or "")
+        remote_ver = str(mf.get("lab_version") or "")
+        if mf.get("compat_window") is not None:
+            remote_window = int(mf["compat_window"])
         asset = (mf.get("assets") or {}).get("create-prism-role.py") or {}
         if asset.get("sha256"):
             remote_hash = str(asset["sha256"]).lower()
@@ -743,12 +804,21 @@ def handle_self_update(apply_update):
 
     commit_note = f", commit={remote_sha}" if remote_sha else ""
     if local_hash == remote_hash:
-        print(f"create-prism-role.py is up-to-date (sha256={local_hash[:12]}{commit_note})")
+        print(f"create-prism-role.py is up-to-date (version={SCRIPT_VERSION}, sha256={local_hash[:12]}{commit_note})")
         return
     print(
         f"Update available for create-prism-role.py "
-        f"(local={local_hash[:12]}, remote={remote_hash[:12]}{commit_note})"
+        f"(version={SCRIPT_VERSION} -> {remote_ver or 'unknown'}, "
+        f"local={local_hash[:12]}, remote={remote_hash[:12]}{commit_note})"
     )
+    if remote_ver:
+        check_script_compat(
+            SCRIPT_VERSION,
+            remote_ver,
+            window=remote_window,
+            allow_force=allow_force,
+            apply_mode=apply_update,
+        )
     if not apply_update:
         return
 
@@ -758,10 +828,23 @@ def handle_self_update(apply_update):
         raise SystemExit(
             f"Downloaded create-prism-role.py sha256 mismatch (expected {remote_hash}, got {got_hash}). Aborting."
         )
+    raw_text = raw.decode("utf-8")
     try:
-        compile(raw.decode("utf-8"), script_path, "exec")
+        compile(raw_text, script_path, "exec")
     except SyntaxError as exc:
         raise SystemExit(f"Downloaded create-prism-role.py failed syntax check: {exc}")
+
+    if not remote_ver:
+        m = re.search(r'^SCRIPT_VERSION\s*=\s*"([^"]+)"', raw_text, re.M)
+        if m:
+            remote_ver = m.group(1)
+            check_script_compat(
+                SCRIPT_VERSION,
+                remote_ver,
+                window=remote_window,
+                allow_force=allow_force,
+                apply_mode=True,
+            )
 
     tmp_path = script_path + ".new"
     try:
@@ -770,18 +853,22 @@ def handle_self_update(apply_update):
         os.chmod(tmp_path, 0o755)
         shutil.copy2(script_path, script_path + ".bak")
         os.replace(tmp_path, script_path)
-        print(f"Updated {script_path} successfully (sha256={got_hash[:12]}, backup at {script_path}.bak)")
+        print(
+            f"Updated {script_path} successfully "
+            f"(version={remote_ver or SCRIPT_VERSION}, sha256={got_hash[:12]}, backup at {script_path}.bak)"
+        )
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
 
 def main():
+    allow_force = "--force" in sys.argv
     if "--self-update" in sys.argv:
-        handle_self_update(apply_update=True)
+        handle_self_update(apply_update=True, allow_force=allow_force)
         return
     if "--check-update" in sys.argv:
-        handle_self_update(apply_update=False)
+        handle_self_update(apply_update=False, allow_force=allow_force)
         return
     print_only = "--print" in sys.argv
     endpoint = os.environ.get("PRISM_ENDPOINT", "")

@@ -304,42 +304,49 @@ def start_pc_mock(ps1_ops, cert, key, mode="pc75_strict"):
 
 
 def test_self_update(cert, key, tmpdir):
-    # Copy scripts into a temp folder and serve modified valid copies via mock HTTPS release
+    # Copy scripts into a temp folder at 1.0.0 to test 3-behind (1.3.0) and 4-behind (1.4.0)
     ps1_copy = os.path.join(tmpdir, "create-prism-role.ps1")
     py_copy = os.path.join(tmpdir, "create-prism-role.py")
-    shutil.copy2(PS1, ps1_copy)
-    shutil.copy2(PY, py_copy)
+    raw_ps1 = open(PS1, "rb").read()
+    raw_py = open(PY, "rb").read()
+    old_ps1 = raw_ps1.replace(b"$SCRIPT_VERSION = '1.3.0'", b"$SCRIPT_VERSION = '1.0.0'", 1)
+    old_py = raw_py.replace(b'SCRIPT_VERSION = "1.3.0"', b'SCRIPT_VERSION = "1.0.0"', 1)
+    with open(ps1_copy, "wb") as fh:
+        fh.write(old_ps1)
+    with open(py_copy, "wb") as fh:
+        fh.write(old_py)
+    os.chmod(py_copy, 0o755)
 
-    new_ps1 = open(PS1, "rb").read() + b"\n# updated-ps1-marker\n"
-    new_py = open(PY, "rb").read() + b"\n# updated-py-marker\n"
+    new_ps1 = raw_ps1 + b"\n# updated-ps1-marker\n"
+    new_py = raw_py + b"\n# updated-py-marker\n"
     h_ps1 = hashlib.sha256(new_ps1).hexdigest()
     h_py = hashlib.sha256(new_py).hexdigest()
 
-    files = {
-        "/MANIFEST.json": json.dumps({
-            "git_sha": "abcdef123456",
-            "assets": {
-                "create-prism-role.ps1": {"sha256": h_ps1, "size": len(new_ps1)},
-                "create-prism-role.py": {"sha256": h_py, "size": len(new_py)},
-            },
-        }).encode(),
-        "/create-prism-role.ps1": new_ps1,
-        "/create-prism-role.py": new_py,
-    }
-    tamper = {"enabled": False}
+    state = {"lab_version": "1.3.0", "tamper": False}
 
     class RelHandler(http.server.BaseHTTPRequestHandler):
         def log_message(self, *a):
             pass
 
         def do_GET(self):
-            data = files.get(self.path)
-            if data is None:
+            if self.path == "/MANIFEST.json":
+                data = json.dumps({
+                    "lab_version": state["lab_version"],
+                    "compat_window": 3,
+                    "git_sha": "abcdef123456",
+                    "assets": {
+                        "create-prism-role.ps1": {"sha256": h_ps1, "size": len(new_ps1)},
+                        "create-prism-role.py": {"sha256": h_py, "size": len(new_py)},
+                    },
+                }).encode()
+            elif self.path == "/create-prism-role.ps1":
+                data = new_ps1 + (b"\n# tampered\n" if state["tamper"] else b"")
+            elif self.path == "/create-prism-role.py":
+                data = new_py + (b"\n# tampered\n" if state["tamper"] else b"")
+            else:
                 self.send_response(404)
                 self.end_headers()
                 return
-            if tamper["enabled"] and self.path in ("/create-prism-role.ps1", "/create-prism-role.py"):
-                data = data + b"\n# tampered\n"
             self.send_response(200)
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
@@ -353,27 +360,38 @@ def test_self_update(cert, key, tmpdir):
     rel_url = f"https://127.0.0.1:{srv.server_address[1]}"
     env = dict(os.environ, NKP_LABS_RELEASE_BASE=rel_url)
 
-    # 1. CheckUpdate reports update available without modifying file
+    # 1. 4 versions behind (1.0.0 -> 1.4.0): CheckUpdate reports NOT BACKWARD-COMPATIBLE & SelfUpdate blocks
+    state["lab_version"] = "1.4.0"
+    r_chk_incompat_ps = subprocess.run([PWSH, "-NoProfile", "-File", ps1_copy, "-CheckUpdate"], env=env, capture_output=True, text=True)
+    assert r_chk_incompat_ps.returncode == 0 and "NOT BACKWARD-COMPATIBLE" in r_chk_incompat_ps.stdout, r_chk_incompat_ps.stdout + r_chk_incompat_ps.stderr
+    r_blk_ps = subprocess.run([PWSH, "-NoProfile", "-File", ps1_copy, "-SelfUpdate"], env=env, capture_output=True, text=True)
+    assert r_blk_ps.returncode != 0 and "NOT BACKWARD-COMPATIBLE" in (r_blk_ps.stdout + r_blk_ps.stderr)
+    r_blk_py = subprocess.run(["python3", py_copy, "--self-update"], env=env, capture_output=True, text=True)
+    assert r_blk_py.returncode != 0 and "NOT BACKWARD-COMPATIBLE" in (r_blk_py.stdout + r_blk_py.stderr)
+    assert b"# updated-ps1-marker" not in open(ps1_copy, "rb").read()
+    assert b"# updated-py-marker" not in open(py_copy, "rb").read()
+
+    # 2. Tampered payload MUST STILL be rejected even with -Force / --force
+    state["tamper"] = True
+    r_bad_ps = subprocess.run([PWSH, "-NoProfile", "-File", ps1_copy, "-SelfUpdate", "-Force"], env=env, capture_output=True, text=True)
+    assert r_bad_ps.returncode != 0, "PS1 self-update should reject tampered sha256 even with -Force!"
+    r_bad_py = subprocess.run(["python3", py_copy, "--self-update", "--force"], env=env, capture_output=True, text=True)
+    assert r_bad_py.returncode != 0, "Python self-update should reject tampered sha256 even with --force!"
+    state["tamper"] = False
+
+    # 3. 3 versions behind (1.0.0 -> 1.3.0): BACKWARD-COMPATIBLE — CheckUpdate reports & SelfUpdate succeeds
+    state["lab_version"] = "1.3.0"
     r = subprocess.run([PWSH, "-NoProfile", "-File", ps1_copy, "-CheckUpdate"], env=env, capture_output=True, text=True)
-    assert r.returncode == 0 and "Update available" in r.stdout, r.stdout + r.stderr
+    assert r.returncode == 0 and "Update available" in r.stdout and "BACKWARD-COMPATIBLE" in r.stdout, r.stdout + r.stderr
     assert b"# updated-ps1-marker" not in open(ps1_copy, "rb").read()
 
-    # 2. Tampered payload MUST be rejected on SHA256 mismatch
-    tamper["enabled"] = True
-    r_bad_ps = subprocess.run([PWSH, "-NoProfile", "-File", ps1_copy, "-SelfUpdate"], env=env, capture_output=True, text=True)
-    assert r_bad_ps.returncode != 0, "PS1 self-update should reject tampered sha256!"
-    r_bad_py = subprocess.run(["python3", py_copy, "--self-update"], env=env, capture_output=True, text=True)
-    assert r_bad_py.returncode != 0, "Python self-update should reject tampered sha256!"
-    tamper["enabled"] = False
-
-    # 3. Valid SelfUpdate replaces atomically and creates .bak
     r_ok_ps = subprocess.run([PWSH, "-NoProfile", "-File", ps1_copy, "-SelfUpdate"], env=env, capture_output=True, text=True)
-    assert r_ok_ps.returncode == 0 and "Updated" in r_ok_ps.stdout, r_ok_ps.stdout + r_ok_ps.stderr
+    assert r_ok_ps.returncode == 0 and "Updated" in r_ok_ps.stdout and "BACKWARD-COMPATIBLE" in r_ok_ps.stdout, r_ok_ps.stdout + r_ok_ps.stderr
     assert b"# updated-ps1-marker" in open(ps1_copy, "rb").read()
     assert os.path.exists(ps1_copy + ".bak")
 
     r_ok_py = subprocess.run(["python3", py_copy, "--self-update"], env=env, capture_output=True, text=True)
-    assert r_ok_py.returncode == 0 and "Updated" in r_ok_py.stdout, r_ok_py.stdout + r_ok_py.stderr
+    assert r_ok_py.returncode == 0 and "Updated" in r_ok_py.stdout and "BACKWARD-COMPATIBLE" in r_ok_py.stdout, r_ok_py.stdout + r_ok_py.stderr
     assert b"# updated-py-marker" in open(py_copy, "rb").read()
     assert os.path.exists(py_copy + ".bak")
 
@@ -382,6 +400,17 @@ def test_self_update(cert, key, tmpdir):
     assert r_up_ps.returncode == 0 and "up-to-date" in r_up_ps.stdout, r_up_ps.stdout + r_up_ps.stderr
     r_up_py = subprocess.run(["python3", py_copy, "--check-update"], env=env, capture_output=True, text=True)
     assert r_up_py.returncode == 0 and "up-to-date" in r_up_py.stdout, r_up_py.stdout + r_up_py.stderr
+
+    # 5. 4 versions behind WITH -Force / --force succeeds (using fresh 1.0.0 copies)
+    with open(ps1_copy, "wb") as fh:
+        fh.write(old_ps1)
+    with open(py_copy, "wb") as fh:
+        fh.write(old_py)
+    state["lab_version"] = "1.4.0"
+    r_f_ps = subprocess.run([PWSH, "-NoProfile", "-File", ps1_copy, "-SelfUpdate", "-Force"], env=env, capture_output=True, text=True)
+    assert r_f_ps.returncode == 0 and "Updated" in r_f_ps.stdout, r_f_ps.stdout + r_f_ps.stderr
+    r_f_py = subprocess.run(["python3", py_copy, "--self-update", "--force"], env=env, capture_output=True, text=True)
+    assert r_f_py.returncode == 0 and "Updated" in r_f_py.stdout, r_f_py.stdout + r_f_py.stderr
 
     srv.shutdown()
 
@@ -453,7 +482,7 @@ def main():
         print(f"[PASS 1] PC 7.5.1.8 strict correlated-deps + 3-hop cycle + auto-View + 8-endpoint verify ({len(op_set)} ops)")
 
         # Scenario 2
-        srv, url, st = start_pc_mock(ps1_ops, cert, key, "pc75_412_retry")
+        srv, url, st = start_pc_mock(ps1_ops, cert, key, mode="pc75_412_retry")
         run_ps1(url)
         assert st["role_puts"] == 1 and st["policy_puts"] == 1
         st["fail_first_put_412"] = True

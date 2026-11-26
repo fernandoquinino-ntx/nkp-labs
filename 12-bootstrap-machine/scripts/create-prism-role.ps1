@@ -11,7 +11,7 @@
 #   -PrismIp <ip-or-url> -RoleName <name> -NkpUser <user>
 #   -AdminUser <admin> -AdminPassword <pass> -PcVersion <auto|7.5|7.3|2024.3>
 #   -ApiVersion <v4.0|v4.1.b3|...> -NkpPassword <pass> -PrintOnly
-#   -CheckUpdate -SelfUpdate
+#   -CheckUpdate -SelfUpdate [-Force]
 #Requires -Version 5.1
 param(
     [string]$PrismIp,
@@ -24,10 +24,13 @@ param(
     [string]$NkpPassword,
     [switch]$PrintOnly,
     [switch]$CheckUpdate,
-    [switch]$SelfUpdate
+    [switch]$SelfUpdate,
+    [switch]$Force
 )
 
 $ErrorActionPreference = 'Stop'
+$SCRIPT_VERSION = '1.3.0'
+$COMPAT_WINDOW = 3
 if ($PSVersionTable.PSVersion.Major -lt 6) {
     if ([int][Net.ServicePointManager]::SecurityProtocol -ne 0) {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -51,6 +54,59 @@ public static class NkpTrustAllCerts {
     [NkpTrustAllCerts]::Enable()
 }
 
+function Test-ScriptCompat {
+    param(
+        [string]$Installed,
+        [string]$Target,
+        [int]$Window = 3,
+        [bool]$AllowForce = $false,
+        [bool]$ApplyMode = $false
+    )
+    if (-not $Target) { return $true }
+    if ($Installed -notmatch '^(\d+)\.(\d+)\.(\d+)$') {
+        Write-Host "Compatibility check: installed $Installed -> target $Target — NOT BACKWARD-COMPATIBLE (invalid version)."
+        if ($ApplyMode -and -not $AllowForce) { throw "Automatic self-update blocked. Pass -Force to override." }
+        return $AllowForce
+    }
+    $cMaj = [int]$Matches[1]; $cMin = [int]$Matches[2]
+    if ($Target -notmatch '^(\d+)\.(\d+)\.(\d+)$') {
+        Write-Host "Compatibility check: installed $Installed -> target $Target — NOT BACKWARD-COMPATIBLE (invalid target version)."
+        if ($ApplyMode -and -not $AllowForce) { throw "Automatic self-update blocked. Pass -Force to override." }
+        return $AllowForce
+    }
+    $tMaj = [int]$Matches[1]; $tMin = [int]$Matches[2]
+    if ($cMaj -ne $tMaj) {
+        $msg = "Compatibility check: installed $Installed -> target $Target (major version mismatch) — NOT BACKWARD-COMPATIBLE."
+        Write-Host $msg
+        if ($ApplyMode) {
+            if ($AllowForce) { Write-Warning "Overriding backward-compatibility guard because -Force was specified."; return $true }
+            throw "$msg Automatic self-update blocked. Pass -Force to override."
+        }
+        return $false
+    }
+    $delta = $tMin - $cMin
+    if ($delta -lt 0) {
+        $msg = "Compatibility check: installed $Installed -> target $Target (downgrade by $(-$delta) minor version(s)) — NOT BACKWARD-COMPATIBLE."
+        Write-Host $msg
+        if ($ApplyMode) {
+            if ($AllowForce) { Write-Warning "Overriding downgrade guard because -Force was specified."; return $true }
+            throw "$msg Automatic self-update blocked. Pass -Force to override."
+        }
+        return $false
+    }
+    if ($delta -le $Window) {
+        Write-Host "Compatibility check: installed $Installed -> target $Target ($delta version(s) behind, max allowed: $Window) — BACKWARD-COMPATIBLE."
+        return $true
+    }
+    $msg = "Compatibility check: installed $Installed -> target $Target ($delta version(s) behind, max allowed: $Window) — NOT BACKWARD-COMPATIBLE."
+    Write-Host $msg
+    if ($ApplyMode) {
+        if ($AllowForce) { Write-Warning "Overriding 3-version backward-compatibility guard because -Force was specified."; return $true }
+        throw "$msg Automatic self-update blocked: only up to $Window previous versions are guaranteed backward-compatible. Upgrade via an intermediate version or pass -Force to override."
+    }
+    return $false
+}
+
 if ($CheckUpdate -or $SelfUpdate) {
     $ProgressPreference = 'SilentlyContinue'
     $repo = if ($env:NKP_LABS_GH_REPO) { $env:NKP_LABS_GH_REPO } else { 'fernandoquinino-ntx/nkp-labs' }
@@ -64,11 +120,15 @@ if ($CheckUpdate -or $SelfUpdate) {
 
     $remoteHash = $null
     $remoteSha = ""
+    $remoteVer = ""
+    $remoteWindow = $COMPAT_WINDOW
     try {
         $mfResp = Invoke-WebRequest @iwrParams -Uri "$releaseBase/MANIFEST.json"
         $mfText = if ($mfResp.Content -is [byte[]]) { [System.Text.Encoding]::UTF8.GetString($mfResp.Content) } else { [string]$mfResp.Content }
         $mf = $mfText | ConvertFrom-Json
         if ($mf.git_sha) { $remoteSha = [string]$mf.git_sha }
+        if ($mf.lab_version) { $remoteVer = [string]$mf.lab_version }
+        if ($mf.compat_window) { $remoteWindow = [int]$mf.compat_window }
         if ($mf.assets -and $mf.assets.PSObject.Properties['create-prism-role.ps1']) {
             $remoteHash = ([string]$mf.assets.'create-prism-role.ps1'.sha256).ToLower()
         }
@@ -82,10 +142,13 @@ if ($CheckUpdate -or $SelfUpdate) {
         throw "Invalid remote sha256 checksum: $remoteHash"
     }
     if ($localHash -eq $remoteHash) {
-        Write-Host "create-prism-role.ps1 is up-to-date (sha256=$($localHash.Substring(0,12))$(if ($remoteSha) { ", commit=$remoteSha" }))"
+        Write-Host "create-prism-role.ps1 is up-to-date (version=$SCRIPT_VERSION, sha256=$($localHash.Substring(0,12))$(if ($remoteSha) { ", commit=$remoteSha" }))"
         return
     }
-    Write-Host "Update available for create-prism-role.ps1 (local=$($localHash.Substring(0,12)), remote=$($remoteHash.Substring(0,12))$(if ($remoteSha) { ", commit=$remoteSha" }))"
+    Write-Host "Update available for create-prism-role.ps1 (version=$SCRIPT_VERSION -> $(if ($remoteVer) { $remoteVer } else { 'unknown' }), local=$($localHash.Substring(0,12)), remote=$($remoteHash.Substring(0,12))$(if ($remoteSha) { ", commit=$remoteSha" }))"
+    if ($remoteVer) {
+        $null = Test-ScriptCompat -Installed $SCRIPT_VERSION -Target $remoteVer -Window $remoteWindow -AllowForce ([bool]$Force) -ApplyMode ([bool]$SelfUpdate)
+    }
     if ($CheckUpdate -and -not $SelfUpdate) { return }
 
     $tmpFile = "$scriptPath.new"
@@ -100,9 +163,16 @@ if ($CheckUpdate -or $SelfUpdate) {
         if ($parseErrs -and $parseErrs.Count -gt 0) {
             throw "Downloaded create-prism-role.ps1 failed PowerShell syntax check. Aborting."
         }
+        if (-not $remoteVer) {
+            $newRaw = Get-Content -Raw $tmpFile
+            if ($newRaw -match "(?m)^\`$SCRIPT_VERSION\s*=\s*'([^']+)'") {
+                $remoteVer = $Matches[1]
+                $null = Test-ScriptCompat -Installed $SCRIPT_VERSION -Target $remoteVer -Window $remoteWindow -AllowForce ([bool]$Force) -ApplyMode $true
+            }
+        }
         Copy-Item -Force -Path $scriptPath -Destination "$scriptPath.bak"
         Move-Item -Force -Path $tmpFile -Destination $scriptPath
-        Write-Host "Updated $scriptPath successfully (sha256=$($gotHash.Substring(0,12)), backup at $scriptPath.bak)"
+        Write-Host "Updated $scriptPath successfully (version=$(if ($remoteVer) { $remoteVer } else { $SCRIPT_VERSION }), sha256=$($gotHash.Substring(0,12)), backup at $scriptPath.bak)"
     } finally {
         if (Test-Path $tmpFile) { Remove-Item -Force $tmpFile -ErrorAction SilentlyContinue }
     }

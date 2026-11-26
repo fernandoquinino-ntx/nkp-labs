@@ -104,8 +104,9 @@ powershell -ExecutionPolicy Bypass -File .\create-prism-role.ps1 `
 | `-PcVersion` | `auto` | Override Prism Central version detection (`auto`, `7.6`, `7.5`, `7.3`, `2024.3`) |
 | `-ApiVersion` | `auto` | Override IAM v4 API version (`v4.0`, `v4.1`, `v4.1.b3`, `v4.0.b1`, ...) |
 | `-PrintOnly` | `$false` | Dry-run: list matched + auto-resolved operations without creating/updating anything |
-| `-CheckUpdate` | `$false` | Check the public `offline-bundle` release SHA-256 against the local script and exit |
-| `-SelfUpdate` | `$false` | Download the latest release script, verify SHA-256 + PowerShell syntax, back up `.bak`, and replace atomically |
+| `-CheckUpdate` | `$false` | Check the public `offline-bundle` release version, backward compatibility (up to 3 previous versions), and SHA-256 |
+| `-SelfUpdate` | `$false` | Verify 3-version backward compatibility, SHA-256, and PowerShell syntax, back up `.bak`, and replace atomically |
+| `-Force` | `$false` | Override the 3-previous-versions backward-compatibility guard during `-SelfUpdate` (SHA-256 and syntax checks remain mandatory) |
 
 ---
 
@@ -164,12 +165,15 @@ PRISM_PASSWORD='<admin-password>' \
 
 ---
 
-## Self-Updating the Standalone Script (SHA-256 Verified)
+## Self-Updating the Standalone Script (SHA-256 & 3-Version Compatibility)
 
 If you downloaded `create-prism-role.ps1` or `create-prism-role.py` directly without cloning the
-repository, you can check for updates and self-update safely in place. Both scripts fetch the
-expected SHA-256 digest from the public `offline-bundle` release (`MANIFEST.json` / `.sha256`),
-validate syntax before replacing, and save a `.bak` copy of your previous file:
+repository, you can check for updates and self-update safely in place. Both scripts:
+
+1. Compare the installed script version against `lab_version` in the release `MANIFEST.json` and
+   explicitly report whether the upgrade is **`BACKWARD-COMPATIBLE`** (up to 3 previous minor
+   versions behind) or **`NOT BACKWARD-COMPATIBLE`** (blocked unless `-Force` / `--force` is passed).
+2. Verify the downloaded SHA-256 digest and validate syntax before replacing (saving a `.bak` copy).
 
 ```powershell
 # Windows PowerShell

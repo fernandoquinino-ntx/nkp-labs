@@ -138,8 +138,9 @@ rendered/           # generated (gitignored)
 00-prereqs/ … 12-bootstrap-machine/
 ```
 
-## Security, Changelog & CI
+## Standards, Security, Changelog & CI
 
+- **Project standards (English-only, folder layout, 3-version backward-compatibility):** [AGENTS.md](AGENTS.md)
 - **Security policy:** [SECURITY.md](SECURITY.md)
 - **Changelog:** [CHANGELOG.md](CHANGELOG.md)
 - **CI quality & tests:** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (ShellCheck, PowerShell AST/PSScriptAnalyzer, 7-scenario Prism Central mock tests, lab render + Helm lint, `gitleaks`)

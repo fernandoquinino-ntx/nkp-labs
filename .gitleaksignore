@@ -1,4 +1,3 @@
-# Documented gitleaks false positives (shell variable expansions & mock test scenario IDs)
+# Documented gitleaks false positives (shell variable expansions in curl -u)
 12-bootstrap-machine/scripts/preflight.sh:curl-auth-user:142
 12-bootstrap-machine/scripts/preflight.sh:curl-auth-user:147
-12-bootstrap-machine/tests/test_prism_role.py:generic-api-key:456

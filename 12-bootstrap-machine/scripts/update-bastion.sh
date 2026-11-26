@@ -3,24 +3,27 @@
 # Run this on a machine that does. Your env, values.local.yaml, create-cluster.env,
 # kubeconfigs, registry/ and airgap/ on the bastion are not touched.
 #
-#   bash update-bastion.sh ubuntu@<bastion-ip> [--dry-run] [--rollback]
+#   bash update-bastion.sh ubuntu@<bastion-ip> [--dry-run] [--rollback] [--force]
 #
-# Downloads the SHA256-verified nkp-labs-update.tar.gz from the public offline-bundle
-# release (falling back to GitHub main codeload if the release is unavailable), backs up
-# the previous scripts on the bastion, preserves +x on both *.sh and *.py, refreshes
-# /usr/local/lib/nkp-bootstrap/ when passwordless sudo is available, and records the version.
+# Checks the bastion's currently installed version before transferring and enforces
+# the 3-previous-versions backward-compatibility policy (same MAJOR, up to 3 minor
+# versions behind). Downloads the SHA256-verified nkp-labs-update.tar.gz from the
+# public offline-bundle release (falling back to GitHub main codeload), backs up
+# previous scripts, sets +x on *.sh and *.py, and refreshes /usr/local/lib/nkp-bootstrap/.
 set -Eeuo pipefail
 trap 'echo "ERROR: [update-bastion] failed at line $LINENO on command: $BASH_COMMAND" >&2' ERR
 
 TARGET=""
 DRY_RUN="false"
 ROLLBACK="false"
+FORCE="false"
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run)  DRY_RUN="true"; shift ;;
     --rollback) ROLLBACK="true"; shift ;;
+    --force)    FORCE="true"; shift ;;
     -h|--help)
-      sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     -*)
@@ -30,10 +33,10 @@ while [ $# -gt 0 ]; do
       TARGET="$1"; shift ;;
   esac
 done
-[ -n "${TARGET}" ] || { echo "usage: update-bastion.sh ubuntu@<bastion-ip> [--dry-run] [--rollback]" >&2; exit 1; }
+[ -n "${TARGET}" ] || { echo "usage: update-bastion.sh ubuntu@<bastion-ip> [--dry-run] [--rollback] [--force]" >&2; exit 1; }
 
 REPO="${NKP_LABS_GH_REPO:-fernandoquinino-ntx/nkp-labs}"
-RELEASE_BASE="https://github.com/${REPO}/releases/download/offline-bundle"
+RELEASE_BASE="${NKP_LABS_RELEASE_BASE:-https://github.com/${REPO}/releases/download/offline-bundle}"
 SSH_OPTS=(-o StrictHostKeyChecking=accept-new)
 
 if [ "${ROLLBACK}" = "true" ]; then
@@ -52,6 +55,60 @@ fi
 sha256_file() {
   if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'
   else shasum -a 256 "$1" | awk '{print $1}'; fi
+}
+
+read_env_key() {
+  local file="$1" key="$2" val=""
+  [ -f "${file}" ] || return 0
+  val="$(awk -F= -v k="${key}" '$1 == k {sub(/^[^=]*=/, ""); print; exit}' "${file}" 2>/dev/null || true)"
+  val="${val%\"}"; val="${val#\"}"
+  val="${val%\'}"; val="${val#\'}"
+  printf '%s' "${val}"
+}
+
+check_compat() {
+  local cur="$1" tgt="$2" win="${3:-3}" allow_force="${4:-false}"
+  if [ -z "${tgt}" ] || [ "${tgt}" = "unknown" ]; then
+    echo "=== Compatibility check: bastion=${cur} -> target=unknown (proceeding) ==="
+    return 0
+  fi
+  if [ -z "${cur}" ] || [ "${cur}" = "none" ]; then
+    echo "=== Compatibility check: fresh bastion -> target ${tgt} — BACKWARD-COMPATIBLE (initial install) ==="
+    return 0
+  fi
+  if ! [[ "${cur}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || ! [[ "${tgt}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "=== Compatibility check: bastion ${cur} -> target ${tgt} — NOT BACKWARD-COMPATIBLE (invalid version) ===" >&2
+    [ "${allow_force}" = "true" ] && { echo "WARNING: --force specified; overriding." >&2; return 0; }
+    return 20
+  fi
+  local c_maj c_min c_pat t_maj t_min t_pat
+  IFS='.' read -r c_maj c_min c_pat <<< "${cur}"
+  IFS='.' read -r t_maj t_min t_pat <<< "${tgt}"
+  : "${c_pat}" "${t_pat}"
+  if [ "${c_maj}" -ne "${t_maj}" ]; then
+    echo "=== Compatibility check: bastion ${cur} -> target ${tgt} (major mismatch) — NOT BACKWARD-COMPATIBLE ===" >&2
+    [ "${allow_force}" = "true" ] && { echo "WARNING: --force specified; overriding." >&2; return 0; }
+    echo "Automatic update blocked. Pass --force to override." >&2
+    return 20
+  fi
+  local delta=$(( t_min - c_min ))
+  if [ "${delta}" -lt 0 ]; then
+    echo "=== Compatibility check: bastion ${cur} -> target ${tgt} (downgrade) — NOT BACKWARD-COMPATIBLE ===" >&2
+    [ "${allow_force}" = "true" ] && { echo "WARNING: --force specified; overriding." >&2; return 0; }
+    echo "Automatic update blocked (downgrade). Use --rollback or pass --force." >&2
+    return 20
+  fi
+  if [ "${delta}" -le "${win}" ]; then
+    echo "=== Compatibility check: bastion ${cur} -> target ${tgt} (${delta} version(s) behind, max allowed: ${win}) — BACKWARD-COMPATIBLE ==="
+    return 0
+  fi
+  echo "=== Compatibility check: bastion ${cur} -> target ${tgt} (${delta} version(s) behind, max allowed: ${win}) — NOT BACKWARD-COMPATIBLE ===" >&2
+  if [ "${allow_force}" = "true" ]; then
+    echo "WARNING: --force specified; overriding 3-version backward-compatibility guard." >&2
+    return 0
+  fi
+  echo "Automatic update blocked: only up to ${win} previous versions are guaranteed backward-compatible. Upgrade via an intermediate version or pass --force." >&2
+  return 20
 }
 
 WORK="$(mktemp -d)"
@@ -89,13 +146,35 @@ else
 fi
 [ -d "${SRC}/scripts" ] || { echo "update archive has no scripts/" >&2; exit 1; }
 
+TARGET_VER="$(read_env_key "${SRC}/versions.env" "LAB_VERSION")"
+COMPAT_WIN="$(read_env_key "${SRC}/versions.env" "LAB_COMPAT_WINDOW")"
+COMPAT_WIN="${COMPAT_WIN:-3}"
+
+echo "=== checking currently installed version on ${TARGET} ==="
+REMOTE_VER="$(ssh "${SSH_OPTS[@]}" "${TARGET}" '
+  v=""
+  [ -f ~/nkp-workspace/.nkp-labs-version ] && v="$(awk -F= "\$1 == \"lab_version\" {print \$2; exit}" ~/nkp-workspace/.nkp-labs-version 2>/dev/null || true)"
+  if [ -z "$v" ] && [ -f ~/nkp-workspace/versions.env ]; then
+    v="$(awk -F= "\$1 == \"LAB_VERSION\" {gsub(/\"/, \"\", \$2); print \$2; exit}" ~/nkp-workspace/versions.env 2>/dev/null || true)"
+  fi
+  if [ -z "$v" ]; then
+    if [ -f ~/nkp-workspace/scripts/create-prism-role.ps1 ]; then v="1.2.0"
+    elif [ -f ~/nkp-workspace/scripts/setup-local-registry.sh ]; then v="1.1.0"
+    elif [ -d ~/nkp-workspace/scripts ]; then v="1.0.0"
+    else v="none"; fi
+  fi
+  printf "%s" "$v"
+' || echo "none")"
+
+check_compat "${REMOTE_VER}" "${TARGET_VER:-unknown}" "${COMPAT_WIN}" "${FORCE}"
+
 if [ "${DRY_RUN}" = "true" ]; then
-  echo "=== dry-run: would copy $(find "${SRC}" -type f | wc -l) files (commit=${COMMIT}, source=${SOURCE_LABEL}) to ${TARGET}:~/nkp-workspace ==="
+  echo "=== dry-run: would copy $(find "${SRC}" -type f | wc -l) files (version=${TARGET_VER:-unknown}, commit=${COMMIT}, source=${SOURCE_LABEL}) to ${TARGET}:~/nkp-workspace ==="
   find "${SRC}/scripts" -maxdepth 1 -type f | sort | sed "s|${SRC}/|  |"
   exit 0
 fi
 
-echo "=== copying lab files to ${TARGET}:~/nkp-workspace (commit=${COMMIT}) ==="
+echo "=== copying lab files to ${TARGET}:~/nkp-workspace (version=${TARGET_VER:-unknown}, commit=${COMMIT}) ==="
 echo "    kept on the bastion: env, values.local.yaml, create-cluster.env, registry/, airgap/, *.kubeconfig"
 # tar over ssh overwrites only the files in the archive. Secrets are not in it.
 # shellcheck disable=SC2029
@@ -115,13 +194,13 @@ tar -C "${SRC}" -czf - \
     fi
     tar -xzf - -C ~/nkp-workspace
     chmod 0755 ~/nkp-workspace/scripts/*.sh ~/nkp-workspace/scripts/*.py 2>/dev/null || true
-    printf 'commit=%s\nupdated_at=%s\nmode=bastion-push\nsource=%s\n' '${COMMIT}' \"\$(date -u +%Y-%m-%dT%H:%M:%SZ)\" '${SOURCE_LABEL}' > ~/nkp-workspace/.nkp-labs-version
+    printf 'lab_version=%s\ncommit=%s\nupdated_at=%s\nmode=bastion-push\nsource=%s\n' '${TARGET_VER:-unknown}' '${COMMIT}' \"\$(date -u +%Y-%m-%dT%H:%M:%SZ)\" '${SOURCE_LABEL}' > ~/nkp-workspace/.nkp-labs-version
     if sudo -n true 2>/dev/null && [ -d /usr/local/lib/nkp-bootstrap ]; then
       for f in bootstrap-host.sh expand-root-disk.sh update-workspace.sh; do
         [ -f ~/nkp-workspace/scripts/\${f} ] && sudo install -m 0755 ~/nkp-workspace/scripts/\${f} /usr/local/lib/nkp-bootstrap/\${f}
       done
     fi
-    echo \"updated \$(find ~/nkp-workspace/scripts -maxdepth 1 \( -name '*.sh' -o -name '*.py' \) | wc -l) executable scripts (commit=${COMMIT})\"
+    echo \"updated \$(find ~/nkp-workspace/scripts -maxdepth 1 \( -name '*.sh' -o -name '*.py' \) | wc -l) executable scripts (version=${TARGET_VER:-unknown}, commit=${COMMIT})\"
   "
 
 echo "=== done. On the bastion the new files are in ~/nkp-workspace ==="

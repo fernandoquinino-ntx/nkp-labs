@@ -64,9 +64,19 @@ jobs:
               sha256sum "${asset}" > "${asset}.sha256"
             done
           )
-          python3 - "$PWD/dist" "$GITHUB_SHA" <<'PY'
-          import datetime, hashlib, json, os, sys
-          dist, sha = sys.argv[1], sys.argv[2]
+          python3 - "$PWD/dist" "$GITHUB_SHA" "$PWD/12-bootstrap-machine/versions.env" <<'PY'
+          import datetime, hashlib, json, os, re, sys
+          dist, sha, ver_file = sys.argv[1], sys.argv[2], sys.argv[3]
+          versions = {}
+          for line in open(ver_file, encoding="utf-8"):
+              m = re.match(r'^([A-Z0-9_]+)="?([^"#\n]+)"?', line.strip())
+              if m:
+                  versions[m.group(1)] = m.group(2).strip()
+          lab_ver = versions.get("LAB_VERSION", "1.3.0")
+          compat_window = int(versions.get("LAB_COMPAT_WINDOW", "3"))
+          maj, min_, _ = (int(x) for x in lab_ver.split("."))
+          prev_versions = [f"{maj}.{m}.0" for m in range(min_ - 1, max(-1, min_ - compat_window - 1), -1)]
+          min_compat = versions.get("LAB_MIN_COMPAT_VERSION", prev_versions[-1] if prev_versions else lab_ver)
           assets = {}
           for fn in sorted(os.listdir(dist)):
               full = os.path.join(dist, fn)
@@ -75,6 +85,10 @@ jobs:
               h = hashlib.sha256(open(full, "rb").read()).hexdigest()
               assets[fn] = {"sha256": h, "size": os.path.getsize(full)}
           manifest = {
+              "lab_version": lab_ver,
+              "compat_window": compat_window,
+              "min_compatible_version": min_compat,
+              "compatible_previous_versions": prev_versions,
               "git_sha": sha[:12],
               "git_sha_full": sha,
               "built_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
