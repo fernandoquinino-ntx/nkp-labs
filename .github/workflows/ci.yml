@@ -90,7 +90,8 @@ jobs:
           helm lint 12-bootstrap-machine/helm-charts/nkp-cluster
           helm lint 12-bootstrap-machine/helm-charts/nkp-kommander
           helm template test-cluster 12-bootstrap-machine/helm-charts/nkp-cluster \
-            -f 12-bootstrap-machine/values.example.yaml >/dev/null
+            -f 12-bootstrap-machine/values.example.yaml \
+            --set sshPublicKey="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICIPlaceholderKey ci@test" >/dev/null
           helm template test-kommander 12-bootstrap-machine/helm-charts/nkp-kommander >/dev/null
 
   security-scan:
