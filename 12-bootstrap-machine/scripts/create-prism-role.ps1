@@ -647,7 +647,7 @@ function Get-PrismEtag($Result) {
 function Invoke-Prism([string]$Method, [string]$Path, $Body, [string]$Etag, [string]$AuthPair) {
     $auth = if ($AuthPair) { $AuthPair } else { $pair }
     $requestId = [guid]::NewGuid().ToString()
-    $maxAttempts = 3
+    $maxAttempts = 5
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         if ($Method -eq "GET" -and $attempt -gt 1) {
             $requestId = [guid]::NewGuid().ToString()
@@ -665,9 +665,10 @@ function Invoke-Prism([string]$Method, [string]$Path, $Body, [string]$Etag, [str
             $headers["If-Match"] = $ifMatch
         }
         $params = @{
-            Method  = $Method
-            Uri     = "$base$Path"
-            Headers = $headers
+            Method     = $Method
+            Uri        = "$base$Path"
+            Headers    = $headers
+            TimeoutSec = 60
         }
         if ($PSVersionTable.PSVersion.Major -ge 6) {
             $params.SkipCertificateCheck = $true
@@ -682,11 +683,18 @@ function Invoke-Prism([string]$Method, [string]$Path, $Body, [string]$Etag, [str
         try {
             $response = Invoke-WebRequest @params
             $parsed = $null
-            if ($response.Content) { $parsed = $response.Content | ConvertFrom-Json }
+            if ($response.Content) {
+                $txt = if ($response.Content -is [byte[]]) { [System.Text.Encoding]::UTF8.GetString($response.Content) } else { [string]$response.Content }
+                $parsed = $txt | ConvertFrom-Json
+            }
             $result = @{ Status = [int]$response.StatusCode; Headers = $response.Headers; Body = $parsed }
         } catch {
             $resp = $_.Exception.Response
             if (-not $resp) {
+                if ($attempt -lt $maxAttempts) {
+                    Start-Sleep -Seconds $attempt
+                    continue
+                }
                 $msgs = @()
                 $ex = $_.Exception
                 while ($ex) {
@@ -788,11 +796,12 @@ function Resolve-IamVersion([string]$Preferred) {
 
 function Get-Pages([string]$Path) {
     $page = 0
+    $limit = 50
     $all = @()
     while ($true) {
         $join = "?"
         if ($Path.Contains("?")) { $join = "&" }
-        $result = Invoke-Prism GET "$Path${join}`$page=$page&`$limit=100" $null $null $null
+        $result = Invoke-Prism GET "$Path${join}`$page=$page&`$limit=$limit" $null $null $null
         if ($result.Status -ne 200) {
             throw "GET $Path failed ($($result.Status)): $(Format-PrismError $result.Body)"
         }
@@ -807,7 +816,7 @@ function Get-Pages([string]$Path) {
         if ($rows.Count -eq 0) { return $all }
         if ($null -ne $total) {
             if ($all.Count -ge $total) { return $all }
-        } elseif ($rows.Count -lt 100) {
+        } elseif ($rows.Count -lt $limit) {
             return $all
         }
     }

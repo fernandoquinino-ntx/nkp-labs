@@ -27,6 +27,8 @@ Does not create the user and does not print passwords.
 
 from collections import deque
 import getpass
+import gzip
+import http.client
 import json
 import os
 import re
@@ -430,10 +432,16 @@ class Prism:
             urllib.request.HTTPBasicAuthHandler(password_mgr),
         )
 
+    def _decode_body(self, raw_bytes, headers):
+        if raw_bytes and str((headers or {}).get("Content-Encoding", "")).lower() == "gzip":
+            raw_bytes = gzip.decompress(raw_bytes)
+        return raw_bytes.decode("utf-8", errors="replace")
+
     def call(self, method, path, body=None, etag=None):
         data = None if body is None else json.dumps(body).encode()
         req_id = str(uuid.uuid4())
-        max_attempts = 3
+        max_attempts = 5
+        last_err = None
         for attempt in range(1, max_attempts + 1):
             if method == "GET" and attempt > 1:
                 req_id = str(uuid.uuid4())
@@ -441,28 +449,48 @@ class Prism:
             if data is not None:
                 request.add_header("Content-Type", "application/json")
             request.add_header("Accept", "application/json")
+            request.add_header("Accept-Encoding", "gzip")
+            request.add_header("Connection", "close")
             request.add_header("Ntnx-Request-Id", req_id)
             if etag:
                 request.add_header("If-Match", etag)
             try:
-                with self.opener.open(request) as response:
-                    raw = response.read().decode()
-                    status, headers, parsed = (
+                with self.opener.open(request, timeout=60) as response:
+                    headers = dict(response.headers)
+                    raw = self._decode_body(response.read(), headers)
+                    status, parsed = (
                         response.status,
-                        dict(response.headers),
                         json.loads(raw) if raw else {},
                     )
             except urllib.error.HTTPError as error:
-                raw = error.read().decode()
+                headers = dict(error.headers)
+                try:
+                    raw = self._decode_body(error.read(), headers)
+                except (http.client.IncompleteRead, http.client.HTTPException, OSError):
+                    raw = ""
                 try:
                     parsed = json.loads(raw) if raw else {}
                 except json.JSONDecodeError:
                     parsed = {"raw": raw}
-                status, headers = error.code, dict(error.headers)
+                status = error.code
+            except (
+                http.client.IncompleteRead,
+                http.client.HTTPException,
+                urllib.error.URLError,
+                OSError,
+                json.JSONDecodeError,
+            ) as err:
+                last_err = err
+                if attempt < max_attempts:
+                    time.sleep(attempt)
+                    continue
+                raise
             if status in (429, 502, 503, 504) and attempt < max_attempts:
                 time.sleep(attempt)
                 continue
             return status, headers, parsed
+        if last_err:
+            raise last_err
 
 
 def detect_pc_version(prism, override=""):
@@ -528,27 +556,41 @@ def detect_iam_version(prism, preferred=""):
 
 
 def pages(prism, path):
-    page = 0
-    seen = 0
-    while True:
-        join = "&" if "?" in path else "?"
-        status, _, payload = prism.call("GET", f"{path}{join}$page={page}&$limit=100")
-        if status != 200:
-            raise SystemExit(f"GET {path} failed ({status}): {format_error(payload)}")
-        rows = payload.get("data") or []
-        if not isinstance(rows, list):
-            rows = [rows]
-        yield from rows
-        seen += len(rows)
-        total = (payload.get("metadata") or {}).get("totalAvailableResults")
-        page += 1
-        if not rows:
+    # Use $limit=50 (and fall back to $limit=25 on truncated streams) so even uncompressed
+    # Prism Central responses stay comfortably below 64 KB proxy/VPN chunk buffers.
+    for limit in (50, 25):
+        collected = []
+        page = 0
+        seen = 0
+        try:
+            while True:
+                join = "&" if "?" in path else "?"
+                status, _, payload = prism.call("GET", f"{path}{join}$page={page}&$limit={limit}")
+                if status != 200:
+                    raise SystemExit(f"GET {path} failed ({status}): {format_error(payload)}")
+                rows = payload.get("data") or []
+                if not isinstance(rows, list):
+                    rows = [rows]
+                collected.extend(rows)
+                seen += len(rows)
+                total = (payload.get("metadata") or {}).get("totalAvailableResults")
+                page += 1
+                if not rows:
+                    break
+                if total is not None:
+                    if seen >= total:
+                        break
+                elif len(rows) < limit:
+                    break
+            yield from collected
             return
-        if total is not None:
-            if seen >= total:
-                return
-        elif len(rows) < 100:
-            return
+        except (http.client.IncompleteRead, http.client.HTTPException, urllib.error.URLError, OSError):
+            if limit == 25:
+                raise
+            print(
+                f"WARNING: Interrupted stream while reading {path} with $limit={limit}; retrying with $limit=25 ...",
+                file=sys.stderr,
+            )
 
 
 def operation_name(row):
