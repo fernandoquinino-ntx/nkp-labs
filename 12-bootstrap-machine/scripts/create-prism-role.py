@@ -760,7 +760,7 @@ def check_script_compat(installed, target, window=COMPAT_WINDOW, allow_force=Fal
     m_cur = re.match(r"^(\d+)\.(\d+)\.(\d+)$", str(installed).strip())
     m_tgt = re.match(r"^(\d+)\.(\d+)\.(\d+)$", str(target).strip())
     if not m_cur or not m_tgt:
-        msg = f"Compatibility check: installed {installed} -> target {target} — NOT BACKWARD-COMPATIBLE (invalid version)."
+        msg = f"Compatibility check: installed {installed} -> target {target} -- NOT BACKWARD-COMPATIBLE (invalid version)."
         print(msg)
         if apply_mode and not allow_force:
             raise SystemExit(f"{msg} Automatic self-update blocked. Pass --force to override.")
@@ -768,7 +768,7 @@ def check_script_compat(installed, target, window=COMPAT_WINDOW, allow_force=Fal
     c_maj, c_min = int(m_cur.group(1)), int(m_cur.group(2))
     t_maj, t_min = int(m_tgt.group(1)), int(m_tgt.group(2))
     if c_maj != t_maj:
-        msg = f"Compatibility check: installed {installed} -> target {target} (major version mismatch) — NOT BACKWARD-COMPATIBLE."
+        msg = f"Compatibility check: installed {installed} -> target {target} (major version mismatch) -- NOT BACKWARD-COMPATIBLE."
         print(msg)
         if apply_mode:
             if allow_force:
@@ -778,7 +778,7 @@ def check_script_compat(installed, target, window=COMPAT_WINDOW, allow_force=Fal
         return False
     delta = t_min - c_min
     if delta < 0:
-        msg = f"Compatibility check: installed {installed} -> target {target} (downgrade by {-delta} minor version(s)) — NOT BACKWARD-COMPATIBLE."
+        msg = f"Compatibility check: installed {installed} -> target {target} (downgrade by {-delta} minor version(s)) -- NOT BACKWARD-COMPATIBLE."
         print(msg)
         if apply_mode:
             if allow_force:
@@ -789,12 +789,12 @@ def check_script_compat(installed, target, window=COMPAT_WINDOW, allow_force=Fal
     if delta <= window:
         print(
             f"Compatibility check: installed {installed} -> target {target} "
-            f"({delta} version(s) behind, max allowed: {window}) — BACKWARD-COMPATIBLE."
+            f"({delta} version(s) behind, max allowed: {window}) -- BACKWARD-COMPATIBLE."
         )
         return True
     msg = (
         f"Compatibility check: installed {installed} -> target {target} "
-        f"({delta} version(s) behind, max allowed: {window}) — NOT BACKWARD-COMPATIBLE."
+        f"({delta} version(s) behind, max allowed: {window}) -- NOT BACKWARD-COMPATIBLE."
     )
     print(msg)
     if apply_mode:

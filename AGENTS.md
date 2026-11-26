@@ -92,6 +92,7 @@ Every update command (`nkp-update` / `update-workspace.sh`, `update-bastion.sh`,
   - Must be executable (`chmod +x`), LF line endings, `set -euo pipefail` (or `set -Eeuo pipefail`), and pass `bash -n` and `shellcheck -S error`.
 - **PowerShell scripts (`*.ps1`)**:
   - Must remain 100% compatible with **Windows PowerShell 5.1** and **PowerShell 7+**.
+  - **Must be pure ASCII only** (no UTF-8 em-dashes, curly quotes, or non-ASCII bytes), because Windows PowerShell 5.1 decodes BOM-less UTF-8 files as Windows-1252 where `—` (`0xE2 0x80 0x94`) turns byte `0x94` into a closing quote `"` and causes a syntax error. Enforced in CI by `test_repo_hygiene.py`.
   - Handle TLS 1.2 on PS 5.1 and decode `byte[]` `Invoke-WebRequest` responses as UTF-8 (GitHub Releases often serve `.json`/`.sha256` as `application/octet-stream`).
   - Must pass PowerShell AST parsing and `PSScriptAnalyzer -Severity Error`.
 - **Python scripts (`*.py`)**:

@@ -64,19 +64,19 @@ function Test-ScriptCompat {
     )
     if (-not $Target) { return $true }
     if ($Installed -notmatch '^(\d+)\.(\d+)\.(\d+)$') {
-        Write-Host "Compatibility check: installed $Installed -> target $Target — NOT BACKWARD-COMPATIBLE (invalid version)."
+        Write-Host "Compatibility check: installed $Installed -> target $Target -- NOT BACKWARD-COMPATIBLE (invalid version)."
         if ($ApplyMode -and -not $AllowForce) { throw "Automatic self-update blocked. Pass -Force to override." }
         return $AllowForce
     }
     $cMaj = [int]$Matches[1]; $cMin = [int]$Matches[2]
     if ($Target -notmatch '^(\d+)\.(\d+)\.(\d+)$') {
-        Write-Host "Compatibility check: installed $Installed -> target $Target — NOT BACKWARD-COMPATIBLE (invalid target version)."
+        Write-Host "Compatibility check: installed $Installed -> target $Target -- NOT BACKWARD-COMPATIBLE (invalid target version)."
         if ($ApplyMode -and -not $AllowForce) { throw "Automatic self-update blocked. Pass -Force to override." }
         return $AllowForce
     }
     $tMaj = [int]$Matches[1]; $tMin = [int]$Matches[2]
     if ($cMaj -ne $tMaj) {
-        $msg = "Compatibility check: installed $Installed -> target $Target (major version mismatch) — NOT BACKWARD-COMPATIBLE."
+        $msg = "Compatibility check: installed $Installed -> target $Target (major version mismatch) -- NOT BACKWARD-COMPATIBLE."
         Write-Host $msg
         if ($ApplyMode) {
             if ($AllowForce) { Write-Warning "Overriding backward-compatibility guard because -Force was specified."; return $true }
@@ -86,7 +86,7 @@ function Test-ScriptCompat {
     }
     $delta = $tMin - $cMin
     if ($delta -lt 0) {
-        $msg = "Compatibility check: installed $Installed -> target $Target (downgrade by $(-$delta) minor version(s)) — NOT BACKWARD-COMPATIBLE."
+        $msg = "Compatibility check: installed $Installed -> target $Target (downgrade by $(-$delta) minor version(s)) -- NOT BACKWARD-COMPATIBLE."
         Write-Host $msg
         if ($ApplyMode) {
             if ($AllowForce) { Write-Warning "Overriding downgrade guard because -Force was specified."; return $true }
@@ -95,10 +95,10 @@ function Test-ScriptCompat {
         return $false
     }
     if ($delta -le $Window) {
-        Write-Host "Compatibility check: installed $Installed -> target $Target ($delta version(s) behind, max allowed: $Window) — BACKWARD-COMPATIBLE."
+        Write-Host "Compatibility check: installed $Installed -> target $Target ($delta version(s) behind, max allowed: $Window) -- BACKWARD-COMPATIBLE."
         return $true
     }
-    $msg = "Compatibility check: installed $Installed -> target $Target ($delta version(s) behind, max allowed: $Window) — NOT BACKWARD-COMPATIBLE."
+    $msg = "Compatibility check: installed $Installed -> target $Target ($delta version(s) behind, max allowed: $Window) -- NOT BACKWARD-COMPATIBLE."
     Write-Host $msg
     if ($ApplyMode) {
         if ($AllowForce) { Write-Warning "Overriding 3-version backward-compatibility guard because -Force was specified."; return $true }

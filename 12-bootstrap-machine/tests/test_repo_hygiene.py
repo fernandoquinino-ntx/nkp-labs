@@ -71,22 +71,35 @@ def test_markdown_links():
 def test_script_permissions_and_eol():
     non_exec = []
     crlf = []
+    ps1_non_ascii = []
     count = 0
+    ps1_count = 0
     for root, dirs, files in os.walk(REPO):
         dirs[:] = [d for d in dirs if d != ".git"]
         for fn in sorted(files):
+            p = os.path.join(root, fn)
+            rel = os.path.relpath(p, REPO)
+            if fn.endswith(".ps1"):
+                ps1_count += 1
+                raw = open(p, "rb").read()
+                if b"\r\n" in raw:
+                    crlf.append(rel)
+                if any(b > 127 for b in raw):
+                    ps1_non_ascii.append(rel)
+                continue
             if not fn.endswith((".sh", ".py")):
                 continue
             count += 1
-            p = os.path.join(root, fn)
-            rel = os.path.relpath(p, REPO)
             if not (os.stat(p).st_mode & stat.S_IXUSR):
                 non_exec.append(rel)
             if b"\r\n" in open(p, "rb").read():
                 crlf.append(rel)
     assert not non_exec, f"Scripts missing executable bit (+x): {non_exec}"
     assert not crlf, f"Scripts with CRLF line endings: {crlf}"
-    print(f"[PASS] Script hygiene ({count} .sh/.py scripts: all +x, 0 CRLF)")
+    assert not ps1_non_ascii, (
+        f"PowerShell scripts contain non-ASCII bytes (breaks Windows PowerShell 5.1 without BOM): {ps1_non_ascii}"
+    )
+    print(f"[PASS] Script hygiene ({count} .sh/.py +x/LF, {ps1_count} .ps1 pure-ASCII/LF)")
 
 
 def test_versions_single_source_of_truth():

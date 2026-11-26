@@ -37,35 +37,35 @@ function Test-BackwardCompat {
         return
     }
     if (-not $Installed -or $Installed -eq 'none') {
-        Write-Host "=== Compatibility check: fresh bastion -> target $TargetVersion — BACKWARD-COMPATIBLE (initial install) ==="
+        Write-Host "=== Compatibility check: fresh bastion -> target $TargetVersion -- BACKWARD-COMPATIBLE (initial install) ==="
         return
     }
     if ($Installed -notmatch '^(\d+)\.(\d+)\.(\d+)$') {
         if ($AllowForce) { Write-Warning "Invalid installed version '$Installed'; overridden by -Force."; return }
-        throw "Compatibility check: bastion '$Installed' -> target '$TargetVersion' — NOT BACKWARD-COMPATIBLE. Pass -Force to override."
+        throw "Compatibility check: bastion '$Installed' -> target '$TargetVersion' -- NOT BACKWARD-COMPATIBLE. Pass -Force to override."
     }
     $cMaj = [int]$Matches[1]; $cMin = [int]$Matches[2]
     if ($TargetVersion -notmatch '^(\d+)\.(\d+)\.(\d+)$') {
         if ($AllowForce) { Write-Warning "Invalid target version '$TargetVersion'; overridden by -Force."; return }
-        throw "Compatibility check: bastion '$Installed' -> target '$TargetVersion' — NOT BACKWARD-COMPATIBLE. Pass -Force to override."
+        throw "Compatibility check: bastion '$Installed' -> target '$TargetVersion' -- NOT BACKWARD-COMPATIBLE. Pass -Force to override."
     }
     $tMaj = [int]$Matches[1]; $tMin = [int]$Matches[2]
     if ($cMaj -ne $tMaj) {
-        $msg = "Compatibility check: bastion $Installed -> target $TargetVersion (major mismatch) — NOT BACKWARD-COMPATIBLE."
+        $msg = "Compatibility check: bastion $Installed -> target $TargetVersion (major mismatch) -- NOT BACKWARD-COMPATIBLE."
         if ($AllowForce) { Write-Warning "$msg Overridden by -Force."; return }
         throw "$msg Automatic update blocked. Pass -Force to override."
     }
     $delta = $tMin - $cMin
     if ($delta -lt 0) {
-        $msg = "Compatibility check: bastion $Installed -> target $TargetVersion (downgrade by $(-$delta) minor version(s)) — NOT BACKWARD-COMPATIBLE."
+        $msg = "Compatibility check: bastion $Installed -> target $TargetVersion (downgrade by $(-$delta) minor version(s)) -- NOT BACKWARD-COMPATIBLE."
         if ($AllowForce) { Write-Warning "$msg Overridden by -Force."; return }
         throw "$msg Use -Rollback or pass -Force to override."
     }
     if ($delta -le $Window) {
-        Write-Host "=== Compatibility check: bastion $Installed -> target $TargetVersion ($delta version(s) behind, max allowed: $Window) — BACKWARD-COMPATIBLE ==="
+        Write-Host "=== Compatibility check: bastion $Installed -> target $TargetVersion ($delta version(s) behind, max allowed: $Window) -- BACKWARD-COMPATIBLE ==="
         return
     }
-    $msg = "Compatibility check: bastion $Installed -> target $TargetVersion ($delta version(s) behind, max allowed: $Window) — NOT BACKWARD-COMPATIBLE."
+    $msg = "Compatibility check: bastion $Installed -> target $TargetVersion ($delta version(s) behind, max allowed: $Window) -- NOT BACKWARD-COMPATIBLE."
     if ($AllowForce) {
         Write-Warning "$msg Overridden by -Force."
         return

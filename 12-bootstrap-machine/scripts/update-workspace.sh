@@ -120,11 +120,11 @@ main() {
       return 0
     fi
     if [ -z "${cur}" ] || [ "${cur}" = "none" ]; then
-      say "Compatibility check: fresh workspace -> target ${tgt} — BACKWARD-COMPATIBLE (initial install)."
+      say "Compatibility check: fresh workspace -> target ${tgt} -- BACKWARD-COMPATIBLE (initial install)."
       return 0
     fi
     if ! [[ "${cur}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || ! [[ "${tgt}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-      say "Compatibility check: installed=${cur} -> target=${tgt} — NOT BACKWARD-COMPATIBLE (invalid version format)."
+      say "Compatibility check: installed=${cur} -> target=${tgt} -- NOT BACKWARD-COMPATIBLE (invalid version format)."
       if [ "${allow_force}" = "true" ]; then
         say "WARNING: --force specified; overriding compatibility check."
         return 0
@@ -138,7 +138,7 @@ main() {
     : "${c_pat}" "${t_pat}"
 
     if [ "${c_maj}" -ne "${t_maj}" ]; then
-      say "Compatibility check: installed ${cur} -> target ${tgt} (major version mismatch) — NOT BACKWARD-COMPATIBLE."
+      say "Compatibility check: installed ${cur} -> target ${tgt} (major version mismatch) -- NOT BACKWARD-COMPATIBLE."
       if [ "${allow_force}" = "true" ]; then
         say "WARNING: --force specified; overriding backward-compatibility guard."
         return 0
@@ -149,7 +149,7 @@ main() {
 
     local delta=$(( t_min - c_min ))
     if [ "${delta}" -lt 0 ]; then
-      say "Compatibility check: installed ${cur} -> target ${tgt} (downgrade by $((-delta)) minor version(s)) — NOT BACKWARD-COMPATIBLE."
+      say "Compatibility check: installed ${cur} -> target ${tgt} (downgrade by $((-delta)) minor version(s)) -- NOT BACKWARD-COMPATIBLE."
       if [ "${allow_force}" = "true" ]; then
         say "WARNING: --force specified; overriding downgrade guard."
         return 0
@@ -159,11 +159,11 @@ main() {
     fi
 
     if [ "${delta}" -le "${win}" ]; then
-      say "Compatibility check: installed ${cur} -> target ${tgt} (${delta} version(s) behind, max allowed: ${win}) — BACKWARD-COMPATIBLE."
+      say "Compatibility check: installed ${cur} -> target ${tgt} (${delta} version(s) behind, max allowed: ${win}) -- BACKWARD-COMPATIBLE."
       return 0
     fi
 
-    say "Compatibility check: installed ${cur} -> target ${tgt} (${delta} version(s) behind, max allowed: ${win}) — NOT BACKWARD-COMPATIBLE."
+    say "Compatibility check: installed ${cur} -> target ${tgt} (${delta} version(s) behind, max allowed: ${win}) -- NOT BACKWARD-COMPATIBLE."
     if [ "${allow_force}" = "true" ]; then
       say "WARNING: --force specified; overriding 3-version backward-compatibility guard."
       return 0

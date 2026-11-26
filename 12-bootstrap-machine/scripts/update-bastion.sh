@@ -73,11 +73,11 @@ check_compat() {
     return 0
   fi
   if [ -z "${cur}" ] || [ "${cur}" = "none" ]; then
-    echo "=== Compatibility check: fresh bastion -> target ${tgt} — BACKWARD-COMPATIBLE (initial install) ==="
+    echo "=== Compatibility check: fresh bastion -> target ${tgt} -- BACKWARD-COMPATIBLE (initial install) ==="
     return 0
   fi
   if ! [[ "${cur}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || ! [[ "${tgt}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "=== Compatibility check: bastion ${cur} -> target ${tgt} — NOT BACKWARD-COMPATIBLE (invalid version) ===" >&2
+    echo "=== Compatibility check: bastion ${cur} -> target ${tgt} -- NOT BACKWARD-COMPATIBLE (invalid version) ===" >&2
     [ "${allow_force}" = "true" ] && { echo "WARNING: --force specified; overriding." >&2; return 0; }
     return 20
   fi
@@ -86,23 +86,23 @@ check_compat() {
   IFS='.' read -r t_maj t_min t_pat <<< "${tgt}"
   : "${c_pat}" "${t_pat}"
   if [ "${c_maj}" -ne "${t_maj}" ]; then
-    echo "=== Compatibility check: bastion ${cur} -> target ${tgt} (major mismatch) — NOT BACKWARD-COMPATIBLE ===" >&2
+    echo "=== Compatibility check: bastion ${cur} -> target ${tgt} (major mismatch) -- NOT BACKWARD-COMPATIBLE ===" >&2
     [ "${allow_force}" = "true" ] && { echo "WARNING: --force specified; overriding." >&2; return 0; }
     echo "Automatic update blocked. Pass --force to override." >&2
     return 20
   fi
   local delta=$(( t_min - c_min ))
   if [ "${delta}" -lt 0 ]; then
-    echo "=== Compatibility check: bastion ${cur} -> target ${tgt} (downgrade) — NOT BACKWARD-COMPATIBLE ===" >&2
+    echo "=== Compatibility check: bastion ${cur} -> target ${tgt} (downgrade) -- NOT BACKWARD-COMPATIBLE ===" >&2
     [ "${allow_force}" = "true" ] && { echo "WARNING: --force specified; overriding." >&2; return 0; }
     echo "Automatic update blocked (downgrade). Use --rollback or pass --force." >&2
     return 20
   fi
   if [ "${delta}" -le "${win}" ]; then
-    echo "=== Compatibility check: bastion ${cur} -> target ${tgt} (${delta} version(s) behind, max allowed: ${win}) — BACKWARD-COMPATIBLE ==="
+    echo "=== Compatibility check: bastion ${cur} -> target ${tgt} (${delta} version(s) behind, max allowed: ${win}) -- BACKWARD-COMPATIBLE ==="
     return 0
   fi
-  echo "=== Compatibility check: bastion ${cur} -> target ${tgt} (${delta} version(s) behind, max allowed: ${win}) — NOT BACKWARD-COMPATIBLE ===" >&2
+  echo "=== Compatibility check: bastion ${cur} -> target ${tgt} (${delta} version(s) behind, max allowed: ${win}) -- NOT BACKWARD-COMPATIBLE ===" >&2
   if [ "${allow_force}" = "true" ]; then
     echo "WARNING: --force specified; overriding 3-version backward-compatibility guard." >&2
     return 0
