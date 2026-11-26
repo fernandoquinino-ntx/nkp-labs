@@ -69,6 +69,10 @@ That 578 MB file is the whole toolchain. Nothing else is downloaded on the VM.
 The VM unpacks it, checks every file, and continues after a reboot from the first unfinished step.
 `nkp-bootstrap-status` shows where it is. The log is `/var/log/nkp-bootstrap.log`.
 
+**Prism Central IAM v4 Role for NKP 2.19:** create or update the least-privileged NKP master role
+and Authorization Policy from Windows PowerShell (`create-prism-role.ps1`) or Linux/macOS
+(`create-prism-role.py`) — see [Step 08 — Prism Central role](12-bootstrap-machine/steps/08-prism-central-role.md).
+
 **Then install the cluster**, from `/home/ubuntu/nkp-workspace`, by either path:
 
 | Path | Command | From |

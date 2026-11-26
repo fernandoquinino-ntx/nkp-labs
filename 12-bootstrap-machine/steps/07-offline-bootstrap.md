@@ -103,4 +103,4 @@ it works. Uncommitted changes are not in the bundle (it uses `git archive HEAD`)
 The bundle holds the NKP CLI. Workflow artifacts on a public repository can be downloaded by any
 signed-in GitHub user. Make the repository private if that matters for your licence.
 
-**Back:** [06 — air gap and registry](06-airgap-registry.md).
+**Back:** [06 — air gap and registry](06-airgap-registry.md) · **Next:** [08 — Prism Central role](08-prism-central-role.md).

@@ -45,6 +45,7 @@ Use one path for a given cluster name.
 | 05 | [`nkp create cluster`](steps/05-create-cluster.md) | fill `create-cluster.env` and run `scripts/create-cluster.sh` |
 | 06 | [Air gap and registry](steps/06-airgap-registry.md) | download the offline bundle and run a TLS registry the cluster trusts |
 | 07 | [Offline bootstrap](steps/07-offline-bootstrap.md) | VM without internet: get the CI bundle on a client, push it, install from it |
+| 08 | [Prism Central role](steps/08-prism-central-role.md) | create or update the least-privileged NKP 2.19 IAM v4 role & Authorization Policy (`create-prism-role.ps1` / `.py`) |
 
 ## Files
 
@@ -71,8 +72,8 @@ Use one path for a given cluster name.
 | `scripts/fetch-airgap-bundle.sh` | download the 2.19.1 air-gapped bundle (~33 GiB). Resumes, checks the size, writes `.complete`. Run by `nkp-airgap-download.service`. Log: `/var/log/nkp-bootstrap.log` |
 | `scripts/setup-local-registry.sh` | self-signed CA, registry certificate, `registry:2` on this host (bcrypt auth + Docker CA trust by host and IP) |
 | `scripts/trust-registry.sh` | Opaque Secret `username` / `password` / `ca.crt` for CAREN |
-| `scripts/create-prism-role.ps1` | Windows PowerShell TUI: creates the NKP Prism Central IAM v4 role (with v4 version auto-detection) and assigns it to an existing user |
-| `scripts/create-prism-role.py` | Linux/macOS Python equivalent of `create-prism-role.ps1` |
+| `scripts/create-prism-role.ps1` | Windows PowerShell 5.1+/7+: creates or updates in-place the NKP 2.19 master Prism Central IAM v4 role (294 ops + correlated `View` safeguard + recursive `relatedOperationList`) and Authorization Policy, with optional 8-endpoint live check. Guide: [08](steps/08-prism-central-role.md) |
+| `scripts/create-prism-role.py` | Linux/macOS Python 3 equivalent of `create-prism-role.ps1`. Guide: [08](steps/08-prism-central-role.md) |
 | `scripts/update-bastion.sh` | Linux/macOS: pushes latest lab files from `main` to an air-gapped bastion without touching local env/registry/airgap data |
 | `scripts/update-bastion.ps1` | Windows PowerShell equivalent of `update-bastion.sh` |
 | `helm-charts/nkp-cluster/` | `NKPCluster` plus Prism secrets |
@@ -98,6 +99,7 @@ Use one path for a given cluster name.
 | What | URL |
 |---|---|
 | This lab | https://github.com/fernandoquinino-ntx/nkp-labs/tree/main/12-bootstrap-machine |
+| Prism Central role script (Windows PS1) | https://github.com/fernandoquinino-ntx/nkp-labs/releases/download/offline-bundle/create-prism-role.ps1 |
 | Cloud-init (raw, paste into Prism) | https://raw.githubusercontent.com/fernandoquinino-ntx/nkp-labs/main/12-bootstrap-machine/cloud-init.yaml |
 | Cloud-init offline (raw) | https://raw.githubusercontent.com/fernandoquinino-ntx/nkp-labs/main/12-bootstrap-machine/cloud-init-offline.yaml |
 | Ubuntu 24.04 amd64 cloud image | https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img |
