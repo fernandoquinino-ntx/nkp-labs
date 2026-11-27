@@ -1,0 +1,10 @@
+# Image list for NKP Pulse air-gapped bundle (consumed by `nkp create bundle --images-file`).
+# Built by scripts/build-pulse-bundle.sh and published as an asset in the offline-bundle release.
+docker.io:
+  images:
+    mesosphere/kubectl:
+      - v1.36.2
+    mesosphere/nkp-pulse-management:
+      - 0.5.1
+    mesosphere/nkp-pulse-workspace:
+      - 0.5.1

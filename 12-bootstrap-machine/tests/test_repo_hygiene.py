@@ -278,6 +278,102 @@ def test_update_scripts_and_3version_compat():
     print("[PASS] Auto-update CLI & 3-previous-versions backward-compatibility checks (nkp-update)")
 
 
+def test_pulse_airgap_scripts():
+    vfile = os.path.join(REPO, "12-bootstrap-machine", "versions.env")
+    versions = {}
+    for line in open(vfile, encoding="utf-8"):
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, v = line.split("=", 1)
+            versions[k.strip()] = v.strip().strip('"')
+
+    pulse_yaml = os.path.join(REPO, "12-bootstrap-machine", "pulse-images.yaml")
+    pdata = yaml.safe_load(open(pulse_yaml, encoding="utf-8"))
+    imgs = (pdata.get("docker.io") or {}).get("images") or {}
+    assert versions["KUBECTL_VERSION"] in imgs.get("mesosphere/kubectl", []), "pulse-images.yaml kubectl mismatch"
+    assert versions["NKP_PULSE_VERSION"] in imgs.get("mesosphere/nkp-pulse-management", []), "pulse-images.yaml management mismatch"
+    assert versions["NKP_PULSE_VERSION"] in imgs.get("mesosphere/nkp-pulse-workspace", []), "pulse-images.yaml workspace mismatch"
+
+    build_sh = os.path.join(REPO, "12-bootstrap-machine", "scripts", "build-pulse-bundle.sh")
+    fix_sh = os.path.join(REPO, "12-bootstrap-machine", "scripts", "fix-pulse-airgap.sh")
+    subprocess.run(["bash", build_sh, "--help"], check=True, stdout=subprocess.DEVNULL)
+    subprocess.run(["bash", fix_sh, "--help"], check=True, stdout=subprocess.DEVNULL)
+
+    sample_jobs = [
+        (
+            "nkp-pulse-management-apply-crds",
+            "docker.io/mesosphere/kubectl:v1.36.2",
+            "registry.nkp.local:5000/mesosphere/kubectl:v1.36.2",
+        ),
+        (
+            "nkp-pulse-management-cm-postdelete",
+            "docker.io/mesosphere/nkp-pulse-management:0.5.1",
+            "registry.nkp.local:5000/mesosphere/nkp-pulse-management:0.5.1",
+        ),
+    ]
+    with tempfile.TemporaryDirectory() as tmp:
+        for job_name, old_img, expected_img in sample_jobs:
+            job_doc = {
+                "apiVersion": "batch/v1",
+                "kind": "Job",
+                "metadata": {
+                    "name": job_name,
+                    "namespace": "kommander",
+                    "uid": "00000000-0000-0000-0000-000000000001",
+                    "resourceVersion": "272929",
+                    "generation": 1,
+                    "creationTimestamp": "2026-11-27T21:34:10Z",
+                    "annotations": {"helm.sh/hook": "pre-install, pre-upgrade"},
+                    "labels": {
+                        "batch.kubernetes.io/controller-uid": "cd27e110-d324-4edd-b358-337bd608b895",
+                        "controller-uid": "cd27e110-d324-4edd-b358-337bd608b895",
+                        "job-name": job_name,
+                        "app.kubernetes.io/name": "nkp-pulse-management",
+                    },
+                },
+                "spec": {
+                    "selector": {"matchLabels": {"batch.kubernetes.io/controller-uid": "cd27e110"}},
+                    "template": {
+                        "metadata": {
+                            "labels": {
+                                "batch.kubernetes.io/controller-uid": "cd27e110-d324-4edd-b358-337bd608b895",
+                                "controller-uid": "cd27e110-d324-4edd-b358-337bd608b895",
+                                "job-name": job_name,
+                            }
+                        },
+                        "spec": {
+                            "restartPolicy": "OnFailure",
+                            "serviceAccountName": job_name,
+                            "containers": [{"name": "run", "image": old_img}],
+                        },
+                    },
+                },
+                "status": {"active": 1},
+            }
+            in_yaml = os.path.join(tmp, f"{job_name}.yaml")
+            with open(in_yaml, "w", encoding="utf-8") as fh:
+                yaml.safe_dump(job_doc, fh, sort_keys=False)
+            r = subprocess.run(
+                [
+                    "bash", fix_sh,
+                    "--fix-manifest-file", in_yaml,
+                    "--image-registry", "registry.nkp.local:5000",
+                    "--image-pull-secret", "nkp-registry-pull",
+                ],
+                capture_output=True, text=True, check=True,
+            )
+            fixed = yaml.safe_load(r.stdout)
+            assert fixed["spec"]["template"]["spec"]["containers"][0]["image"] == expected_img
+            assert "status" not in fixed
+            assert "selector" not in fixed["spec"]
+            assert "uid" not in fixed["metadata"] and "resourceVersion" not in fixed["metadata"]
+            assert "controller-uid" not in (fixed["spec"]["template"]["metadata"].get("labels") or {})
+            assert fixed["spec"]["template"]["spec"]["imagePullSecrets"] == [{"name": "nkp-registry-pull"}]
+            assert fixed["metadata"]["annotations"]["helm.sh/hook"] == "pre-install, pre-upgrade"
+
+    print("[PASS] NKP Pulse air-gap bundle config & Job manifest rewrite tests")
+
+
 def main():
     test_agents_and_english_only()
     test_markdown_links()
@@ -285,6 +381,7 @@ def main():
     test_versions_single_source_of_truth()
     test_render_labs()
     test_update_scripts_and_3version_compat()
+    test_pulse_airgap_scripts()
     print("\nALL REPO HYGIENE TESTS PASSED!")
 
 

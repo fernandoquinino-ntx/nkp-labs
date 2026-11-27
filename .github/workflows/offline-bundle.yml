@@ -88,11 +88,22 @@ jobs:
           bash 12-bootstrap-machine/scripts/build-offline-bundle.sh "$PWD/dist"
           cp 12-bootstrap-machine/cloud-init-offline.yaml dist/
           echo "name=$(basename dist/nkp-bootstrap-offline-*.tar.gz .tar.gz)" >> "$GITHUB_OUTPUT"
+
+          # Build NKP Pulse air-gapped OCI image bundle using the cached nkp CLI
+          nkp_tmp="$(mktemp -d)"
+          tar -xzf dist/.cache/nkp_*_linux_amd64.tar.gz -C "${nkp_tmp}" nkp
+          chmod +x "${nkp_tmp}/nkp"
+          NKP_BIN="${nkp_tmp}/nkp" bash 12-bootstrap-machine/scripts/build-pulse-bundle.sh "$PWD/dist"
+          rm -rf "${nkp_tmp}"
+          pulse_name="$(basename dist/nkp-pulse-image-bundle-*.tar)"
+          echo "pulse_name=${pulse_name}" >> "$GITHUB_OUTPUT"
+
           git archive --format=tar.gz --output dist/nkp-labs-update.tar.gz HEAD 12-bootstrap-machine
           cp 12-bootstrap-machine/scripts/update-bastion.sh dist/update-bastion.sh
           cp 12-bootstrap-machine/scripts/update-bastion.ps1 dist/update-bastion.ps1
           cp 12-bootstrap-machine/scripts/create-prism-role.ps1 dist/create-prism-role.ps1
           cp 12-bootstrap-machine/scripts/create-prism-role.py dist/create-prism-role.py
+          cp 12-bootstrap-machine/scripts/fix-pulse-airgap.sh dist/fix-pulse-airgap.sh
 
           # Generate per-asset .sha256 files and MANIFEST.json for verified auto-update
           (
@@ -103,7 +114,8 @@ jobs:
               update-bastion.sh \
               update-bastion.ps1 \
               create-prism-role.ps1 \
-              create-prism-role.py; do
+              create-prism-role.py \
+              fix-pulse-airgap.sh; do
               sha256sum "${asset}" > "${asset}.sha256"
             done
           )
@@ -151,6 +163,8 @@ jobs:
           path: |
             dist/${{ steps.build.outputs.name }}.tar.gz
             dist/${{ steps.build.outputs.name }}.tar.gz.sha256
+            dist/${{ steps.build.outputs.pulse_name }}
+            dist/${{ steps.build.outputs.pulse_name }}.sha256
             dist/cloud-init-offline.yaml
             dist/MANIFEST.json
           retention-days: 30
@@ -162,10 +176,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           name="${{ steps.build.outputs.name }}"
-          notes="Built from ${GITHUB_SHA}. Verified offline install on Ubuntu 24.04. Download needs no login."
+          pulse_name="${{ steps.build.outputs.pulse_name }}"
+          notes="Built from ${GITHUB_SHA}. Verified offline install on Ubuntu 24.04. Includes NKP Pulse offline image bundle (${pulse_name}). Download needs no login."
           assets=(
             "dist/${name}.tar.gz"
             "dist/${name}.tar.gz.sha256"
+            "dist/${pulse_name}"
+            "dist/${pulse_name}.sha256"
             dist/cloud-init-offline.yaml
             dist/cloud-init-offline.yaml.sha256
             dist/nkp-labs-update.tar.gz
@@ -178,6 +195,8 @@ jobs:
             dist/create-prism-role.ps1.sha256
             dist/create-prism-role.py
             dist/create-prism-role.py.sha256
+            dist/fix-pulse-airgap.sh
+            dist/fix-pulse-airgap.sh.sha256
             dist/MANIFEST.json
           )
           if gh release view offline-bundle --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then

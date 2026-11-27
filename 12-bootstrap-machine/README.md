@@ -98,7 +98,10 @@ All update paths preserve your local `env`, `values.local.yaml`, `create-cluster
 | `create-cluster.env.example` | CLI path values. Copy to `create-cluster.env` (gitignored) |
 | `scripts/create-cluster.sh` | CLI path: `nkp create cluster nutanix --self-managed` (auto-detects air-gap bootstrap tar, patches CoreDNS & `/etc/hosts`) |
 | `scripts/preflight.sh` | 5-second fail-fast check before `create-cluster.sh` (env, disk, registry TLS + pushed bundles, VIP conflicts, Prism objects) |
-| `scripts/push-airgap-bundles.sh` | idempotent air-gap helper: extracts the 33 GB bundle if needed and pushes `konvoy` + `kommander` bundles to the local registry |
+| `scripts/push-airgap-bundles.sh` | idempotent air-gap helper: extracts the 33 GB bundle if needed and pushes `konvoy`, `kommander`, and any `nkp-pulse-image-bundle*.tar` bundles to the local registry |
+| `pulse-images.yaml` | declarative OCI image list (`mesosphere/kubectl:v1.36.2`, `nkp-pulse-management:0.5.1`, `nkp-pulse-workspace:0.5.1`) for `nkp create bundle` |
+| `scripts/build-pulse-bundle.sh` | online workstation / CI: builds `nkp-pulse-image-bundle-v2.19.1.tar` + `.sha256` compatible with `nkp push bundle` |
+| `scripts/fix-pulse-airgap.sh` | air-gapped bastion: pushes `nkp-pulse-image-bundle*.tar` via `nkp push bundle`, verifies registry manifests, backs up & recreates stuck NKP Pulse Jobs with local registry images (`--dry-run`, `--reconcile`) |
 | `scripts/post-install-info.sh` | Day-0 handoff summary: nodes, CAPI status, CoreDNS check, Flux `HelmRelease` health, Kommander URL/credentials, workstation hosts entry |
 | `scripts/cleanup-bootstrap.sh` | safely removes stuck kind bootstrap containers after a failed install without touching `nkp-registry`, `airgap/`, or env files |
 | `scripts/fetch-airgap-bundle.sh` | download the 2.19.1 air-gapped bundle (~33 GiB). Resumes, checks the size, writes `.complete`. Run by `nkp-airgap-download.service`. Log: `/var/log/nkp-bootstrap.log` |
@@ -108,8 +111,8 @@ All update paths preserve your local `env`, `values.local.yaml`, `create-cluster
 | `scripts/create-prism-role.py` | Linux/macOS Python 3 equivalent of `create-prism-role.ps1`, with `--check-update`/`--self-update`. Guide: [08](steps/08-prism-central-role.md) |
 | `scripts/update-bastion.sh` | Linux/macOS: SHA-256 verified tarball update to an air-gapped bastion (`--dry-run`, `--rollback`) without touching local env/registry/airgap data |
 | `scripts/update-bastion.ps1` | Windows PowerShell equivalent of `update-bastion.sh` (`-DryRun`, `-Rollback`) |
-| `tests/test_prism_role.py` | 7-scenario local HTTPS mock test suite for `create-prism-role.py` and `create-prism-role.ps1` (runs in CI) |
-| `tests/test_repo_hygiene.py` | Repo hygiene checks: Markdown links, `+x` & LF line endings, `versions.env` sync, `render.sh` YAML validation (runs in CI) |
+| `tests/test_prism_role.py` | 9-scenario local HTTPS mock test suite for `create-prism-role.py` and `create-prism-role.ps1` (runs in CI across Linux, Windows PS 5.1/7, and macOS) |
+| `tests/test_repo_hygiene.py` | Repo hygiene checks: Markdown links, `+x` & LF line endings, pure-ASCII PS1, English-only, `versions.env` sync, `render.sh` YAML validation, Pulse Job rewrite tests (runs in CI) |
 | `helm-charts/nkp-cluster/` | `NKPCluster` plus Prism secrets |
 | `helm-charts/nkp-kommander/` | Kommander installer ConfigMap and the Docker Hub secret |
 
@@ -134,6 +137,7 @@ All update paths preserve your local `env`, `values.local.yaml`, `create-cluster
 |---|---|
 | This lab | https://github.com/fernandoquinino-ntx/nkp-labs/tree/main/12-bootstrap-machine |
 | Offline bundle release & `MANIFEST.json` | https://github.com/fernandoquinino-ntx/nkp-labs/releases/tag/offline-bundle |
+| NKP Pulse offline image bundle (`nkp push bundle`) | https://github.com/fernandoquinino-ntx/nkp-labs/releases/download/offline-bundle/nkp-pulse-image-bundle-v2.19.1.tar |
 | Prism Central role script (Windows PS1) | https://github.com/fernandoquinino-ntx/nkp-labs/releases/download/offline-bundle/create-prism-role.ps1 |
 | Prism Central role script (Linux/macOS Python) | https://github.com/fernandoquinino-ntx/nkp-labs/releases/download/offline-bundle/create-prism-role.py |
 | Cloud-init (raw, paste into Prism) | https://raw.githubusercontent.com/fernandoquinino-ntx/nkp-labs/main/12-bootstrap-machine/cloud-init.yaml |

@@ -79,7 +79,7 @@ echo "registry ok (${PUSH_URL} -> HTTP 200)"
 
 # 3. Extract the outer 33 GB tarball if container-images/*.tar is not there yet
 find_image_bundles() {
-  find "${AIRGAP_DIR}" -maxdepth 4 -type f -path '*/container-images/*-image-bundle-*.tar' 2>/dev/null | sort
+  find "${AIRGAP_DIR}" -maxdepth 4 -type f \( -path '*/container-images/*-image-bundle-*.tar' -o -name 'nkp-pulse-image-bundle*.tar' \) 2>/dev/null | sort
 }
 
 mapfile -t bundles < <(find_image_bundles)

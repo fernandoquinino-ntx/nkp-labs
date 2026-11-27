@@ -91,4 +91,42 @@ Then set `clusterConfig.imageRegistries` and `globalImageRegistryMirror` to
 fragment. Applying it rolls nodes. This is the same shape as
 `nkp-deployer/configure/registry/runbooks/01-registry-not-set.md`.
 
+## NKP Pulse Air-Gapped Images & Stuck Hook Jobs
+
+In air-gapped NKP 2.19 environments, the `nkp-pulse-management` Helm hook Jobs
+(`nkp-pulse-management-apply-crds` and `nkp-pulse-management-cm-postdelete`) may attempt to pull
+`docker.io/mesosphere/kubectl:v1.36.2` and `docker.io/mesosphere/nkp-pulse-management:0.5.1` from
+the internet.
+
+A ready-to-use `nkp push bundle`-compatible OCI image bundle (`nkp-pulse-image-bundle-v2.19.1.tar`,
+containing `mesosphere/kubectl:v1.36.2`, `mesosphere/nkp-pulse-management:0.5.1`, and
+`mesosphere/nkp-pulse-workspace:0.5.1`) is published automatically on the public
+[`offline-bundle`](https://github.com/fernandoquinino-ntx/nkp-labs/releases/tag/offline-bundle)
+release — or can be built on any internet-connected host with `./scripts/build-pulse-bundle.sh`.
+
+1. **Download on an internet-connected workstation and copy to the bastion:**
+
+   ```bash
+   curl -fsSL https://github.com/fernandoquinino-ntx/nkp-labs/releases/download/offline-bundle/nkp-pulse-image-bundle-v2.19.1.tar \
+     -o nkp-pulse-image-bundle-v2.19.1.tar
+   curl -fsSL https://github.com/fernandoquinino-ntx/nkp-labs/releases/download/offline-bundle/nkp-pulse-image-bundle-v2.19.1.tar.sha256 \
+     -o nkp-pulse-image-bundle-v2.19.1.tar.sha256
+   scp nkp-pulse-image-bundle-v2.19.1.tar* ubuntu@<bastion-ip>:~/nkp-workspace/airgap/
+   ```
+
+2. **Push the bundle with `nkp push bundle` and fix the stuck Job manifests on the bastion:**
+
+   ```bash
+   cd /home/ubuntu/nkp-workspace
+   # Preview patched Job manifests first (no cluster changes):
+   ./scripts/fix-pulse-airgap.sh --dry-run
+
+   # Push bundle to local registry, verify HTTP 200, back up originals, and recreate fixed Jobs:
+   ./scripts/fix-pulse-airgap.sh --reconcile
+   ```
+
+   Pass `--image-registry <host:port>` if the cluster nodes reach your registry at a different
+   hostname/IP than the bastion push URL, or `--image-pull-secret <secret>` if private auth is
+   required on the recreated Jobs.
+
 **Next:** [07 — offline bootstrap](07-offline-bootstrap.md).
