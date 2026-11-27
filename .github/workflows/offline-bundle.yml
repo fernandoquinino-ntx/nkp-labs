@@ -18,7 +18,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  gate-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check bash syntax and ShellCheck on Lab 12 scripts
+        run: |
+          mapfile -t scripts < <(find 12-bootstrap-machine/scripts -name '*.sh' | sort)
+          for s in "${scripts[@]}"; do bash -n "$s"; done
+          shellcheck -S error "${scripts[@]}"
+
+      - name: Run repo hygiene, pure-ASCII PS1, English-only, and 3-version compat tests
+        run: |
+          python3 -c "import yaml" 2>/dev/null || pip3 install --break-system-packages pyyaml
+          python3 12-bootstrap-machine/tests/test_repo_hygiene.py
+
+      - name: Run 9-scenario Prism Central role suite on Linux (pwsh 7 + Python 3)
+        run: python3 12-bootstrap-machine/tests/test_prism_role.py
+
+  gate-windows-ps51:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Verify ALL .ps1 scripts parse on real Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          foreach ($f in (Get-ChildItem -Recurse -Filter '*.ps1')) {
+              $t = $null; $e = $null
+              $null = [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$t, [ref]$e)
+              if ($e.Count -gt 0) { $e | ForEach-Object { Write-Error "$($f.FullName): $_" }; exit 1 }
+              Write-Host "PS 5.1 AST OK: $($f.Name)"
+          }
+
+      - name: Run 9-scenario Prism Central role suite on real Windows PowerShell 5.1
+        shell: pwsh
+        env:
+          PWSH_BIN: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
+        run: python 12-bootstrap-machine/tests/test_prism_role.py
+
   bundle:
+    needs: [gate-linux, gate-windows-ps51]
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:

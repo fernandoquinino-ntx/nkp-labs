@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """End-to-end automated test suite for create-prism-role.ps1 and create-prism-role.py.
 
-Runs 7 offline HTTPS mock scenarios covering:
+Runs 9 offline HTTPS mock scenarios across Linux, macOS, and Windows (PS 5.1 & PS 7):
   0. Static parity (exact op list & MinPc), 0 duplicates, py_compile, PS1 AST parse
   1. PC pc.7.5.1.8 strict correlated-dependency enforcement + 3-hop relatedOperationList
      cycle + INTERNAL/SYSTEM_DEFINED_ONLY filtering + auto correlated-View safeguard +
@@ -10,30 +10,49 @@ Runs 7 offline HTTPS mock scenarios covering:
   3. Hidden relatedOperationList detail-endpoint fallback (GET /authz/operations/{extId})
   4. Legacy PC pc.2024.3 (v3 op names + IAM v4.0.b1 auto-fallback)
   5. -PrintOnly / --print dry-run (0 mutations)
-  6. -CheckUpdate / -SelfUpdate and --check-update / --self-update (SHA256 verification,
-     bad-checksum rejection, atomic replace, and .bak backup)
+  6. -CheckUpdate / -SelfUpdate & --check-update / --self-update (3-version backward-compat,
+     -Force/--force override, SHA256 tamper rejection, atomic replace, and .bak backup)
+  7. Resilient HTTP transport: mid-stream chunked IncompleteRead recovery + gzip decompression
+  8. Interactive TTY prompts (POSIX): endpoint, role, user, masked passwords, 8-endpoint verify
 """
 
 import ast
 import base64
+import gzip
 import hashlib
 import http.server
+import importlib.util
 import json
 import os
 import re
+import select
 import shutil
 import ssl
 import subprocess
+import sys
 import tempfile
 import threading
+import time
 import uuid
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 PS1 = os.path.join(REPO, "12-bootstrap-machine", "scripts", "create-prism-role.ps1")
 PY = os.path.join(REPO, "12-bootstrap-machine", "scripts", "create-prism-role.py")
-PWSH = os.environ.get("PWSH_BIN") or shutil.which("pwsh")
-if not PWSH:
-    raise SystemExit("pwsh not found on PATH (set PWSH_BIN to PowerShell binary)")
+PYTHON = sys.executable
+SKIP_PS1 = os.environ.get("TEST_SKIP_PS1") == "1"
+PWSH = None if SKIP_PS1 else (
+    os.environ.get("PWSH_BIN") or shutil.which("pwsh") or shutil.which("powershell")
+)
+if not SKIP_PS1 and not PWSH:
+    raise SystemExit("PowerShell binary not found on PATH (set PWSH_BIN or TEST_SKIP_PS1=1)")
+
+
+def ps_base_cmd():
+    cmd = [PWSH, "-NoProfile"]
+    if os.name == "nt":
+        cmd += ["-ExecutionPolicy", "Bypass"]
+    return cmd
+
 
 ROLE_DESC_RE = re.compile(r'^[^<>;\'()&+%\\/\"`]*$')
 
@@ -66,12 +85,25 @@ CORRELATED_RULES = {
 }
 
 
+def find_openssl():
+    cand = shutil.which("openssl")
+    if cand:
+        return cand
+    for win_path in (
+        r"C:\Program Files\Git\usr\bin\openssl.exe",
+        r"C:\Program Files\Git\mingw64\bin\openssl.exe",
+    ):
+        if os.path.isfile(win_path):
+            return win_path
+    raise SystemExit("openssl binary not found on PATH")
+
+
 def make_self_signed_cert(tmpdir):
     cert = os.path.join(tmpdir, "cert.pem")
     key = os.path.join(tmpdir, "key.pem")
     subprocess.run(
         [
-            "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+            find_openssl(), "req", "-x509", "-newkey", "rsa:2048", "-nodes",
             "-keyout", key, "-out", cert, "-days", "1", "-subj", "/CN=127.0.0.1",
         ],
         check=True,
@@ -315,7 +347,8 @@ def test_self_update(cert, key, tmpdir):
         fh.write(old_ps1)
     with open(py_copy, "wb") as fh:
         fh.write(old_py)
-    os.chmod(py_copy, 0o755)
+    if os.name != "nt":
+        os.chmod(py_copy, 0o755)
 
     new_ps1 = raw_ps1 + b"\n# updated-ps1-marker\n"
     new_py = raw_py + b"\n# updated-py-marker\n"
@@ -362,43 +395,47 @@ def test_self_update(cert, key, tmpdir):
 
     # 1. 4 versions behind (1.0.0 -> 1.4.0): CheckUpdate reports NOT BACKWARD-COMPATIBLE & SelfUpdate blocks
     state["lab_version"] = "1.4.0"
-    r_chk_incompat_ps = subprocess.run([PWSH, "-NoProfile", "-File", ps1_copy, "-CheckUpdate"], env=env, capture_output=True, text=True)
-    assert r_chk_incompat_ps.returncode == 0 and "NOT BACKWARD-COMPATIBLE" in r_chk_incompat_ps.stdout, r_chk_incompat_ps.stdout + r_chk_incompat_ps.stderr
-    r_blk_ps = subprocess.run([PWSH, "-NoProfile", "-File", ps1_copy, "-SelfUpdate"], env=env, capture_output=True, text=True)
-    assert r_blk_ps.returncode != 0 and "NOT BACKWARD-COMPATIBLE" in (r_blk_ps.stdout + r_blk_ps.stderr)
-    r_blk_py = subprocess.run(["python3", py_copy, "--self-update"], env=env, capture_output=True, text=True)
+    if not SKIP_PS1:
+        r_chk_incompat_ps = subprocess.run(ps_base_cmd() + ["-File", ps1_copy, "-CheckUpdate"], env=env, capture_output=True, text=True)
+        assert r_chk_incompat_ps.returncode == 0 and "NOT BACKWARD-COMPATIBLE" in r_chk_incompat_ps.stdout, r_chk_incompat_ps.stdout + r_chk_incompat_ps.stderr
+        r_blk_ps = subprocess.run(ps_base_cmd() + ["-File", ps1_copy, "-SelfUpdate"], env=env, capture_output=True, text=True)
+        assert r_blk_ps.returncode != 0 and "NOT BACKWARD-COMPATIBLE" in (r_blk_ps.stdout + r_blk_ps.stderr)
+        assert b"# updated-ps1-marker" not in open(ps1_copy, "rb").read()
+    r_blk_py = subprocess.run([PYTHON, py_copy, "--self-update"], env=env, capture_output=True, text=True)
     assert r_blk_py.returncode != 0 and "NOT BACKWARD-COMPATIBLE" in (r_blk_py.stdout + r_blk_py.stderr)
-    assert b"# updated-ps1-marker" not in open(ps1_copy, "rb").read()
     assert b"# updated-py-marker" not in open(py_copy, "rb").read()
 
     # 2. Tampered payload MUST STILL be rejected even with -Force / --force
     state["tamper"] = True
-    r_bad_ps = subprocess.run([PWSH, "-NoProfile", "-File", ps1_copy, "-SelfUpdate", "-Force"], env=env, capture_output=True, text=True)
-    assert r_bad_ps.returncode != 0, "PS1 self-update should reject tampered sha256 even with -Force!"
-    r_bad_py = subprocess.run(["python3", py_copy, "--self-update", "--force"], env=env, capture_output=True, text=True)
+    if not SKIP_PS1:
+        r_bad_ps = subprocess.run(ps_base_cmd() + ["-File", ps1_copy, "-SelfUpdate", "-Force"], env=env, capture_output=True, text=True)
+        assert r_bad_ps.returncode != 0, "PS1 self-update should reject tampered sha256 even with -Force!"
+    r_bad_py = subprocess.run([PYTHON, py_copy, "--self-update", "--force"], env=env, capture_output=True, text=True)
     assert r_bad_py.returncode != 0, "Python self-update should reject tampered sha256 even with --force!"
     state["tamper"] = False
 
-    # 3. 3 versions behind (1.0.0 -> 1.3.0): BACKWARD-COMPATIBLE — CheckUpdate reports & SelfUpdate succeeds
+    # 3. 3 versions behind (1.0.0 -> 1.3.0): BACKWARD-COMPATIBLE -- CheckUpdate reports & SelfUpdate succeeds
     state["lab_version"] = "1.3.0"
-    r = subprocess.run([PWSH, "-NoProfile", "-File", ps1_copy, "-CheckUpdate"], env=env, capture_output=True, text=True)
-    assert r.returncode == 0 and "Update available" in r.stdout and "BACKWARD-COMPATIBLE" in r.stdout, r.stdout + r.stderr
-    assert b"# updated-ps1-marker" not in open(ps1_copy, "rb").read()
+    if not SKIP_PS1:
+        r = subprocess.run(ps_base_cmd() + ["-File", ps1_copy, "-CheckUpdate"], env=env, capture_output=True, text=True)
+        assert r.returncode == 0 and "Update available" in r.stdout and "BACKWARD-COMPATIBLE" in r.stdout, r.stdout + r.stderr
+        assert b"# updated-ps1-marker" not in open(ps1_copy, "rb").read()
 
-    r_ok_ps = subprocess.run([PWSH, "-NoProfile", "-File", ps1_copy, "-SelfUpdate"], env=env, capture_output=True, text=True)
-    assert r_ok_ps.returncode == 0 and "Updated" in r_ok_ps.stdout and "BACKWARD-COMPATIBLE" in r_ok_ps.stdout, r_ok_ps.stdout + r_ok_ps.stderr
-    assert b"# updated-ps1-marker" in open(ps1_copy, "rb").read()
-    assert os.path.exists(ps1_copy + ".bak")
+        r_ok_ps = subprocess.run(ps_base_cmd() + ["-File", ps1_copy, "-SelfUpdate"], env=env, capture_output=True, text=True)
+        assert r_ok_ps.returncode == 0 and "Updated" in r_ok_ps.stdout and "BACKWARD-COMPATIBLE" in r_ok_ps.stdout, r_ok_ps.stdout + r_ok_ps.stderr
+        assert b"# updated-ps1-marker" in open(ps1_copy, "rb").read()
+        assert os.path.exists(ps1_copy + ".bak")
 
-    r_ok_py = subprocess.run(["python3", py_copy, "--self-update"], env=env, capture_output=True, text=True)
+    r_ok_py = subprocess.run([PYTHON, py_copy, "--self-update"], env=env, capture_output=True, text=True)
     assert r_ok_py.returncode == 0 and "Updated" in r_ok_py.stdout and "BACKWARD-COMPATIBLE" in r_ok_py.stdout, r_ok_py.stdout + r_ok_py.stderr
     assert b"# updated-py-marker" in open(py_copy, "rb").read()
     assert os.path.exists(py_copy + ".bak")
 
     # 4. Subsequent CheckUpdate reports up-to-date
-    r_up_ps = subprocess.run([PWSH, "-NoProfile", "-File", ps1_copy, "-CheckUpdate"], env=env, capture_output=True, text=True)
-    assert r_up_ps.returncode == 0 and "up-to-date" in r_up_ps.stdout, r_up_ps.stdout + r_up_ps.stderr
-    r_up_py = subprocess.run(["python3", py_copy, "--check-update"], env=env, capture_output=True, text=True)
+    if not SKIP_PS1:
+        r_up_ps = subprocess.run(ps_base_cmd() + ["-File", ps1_copy, "-CheckUpdate"], env=env, capture_output=True, text=True)
+        assert r_up_ps.returncode == 0 and "up-to-date" in r_up_ps.stdout, r_up_ps.stdout + r_up_ps.stderr
+    r_up_py = subprocess.run([PYTHON, py_copy, "--check-update"], env=env, capture_output=True, text=True)
     assert r_up_py.returncode == 0 and "up-to-date" in r_up_py.stdout, r_up_py.stdout + r_up_py.stderr
 
     # 5. 4 versions behind WITH -Force / --force succeeds (using fresh 1.0.0 copies)
@@ -407,12 +444,117 @@ def test_self_update(cert, key, tmpdir):
     with open(py_copy, "wb") as fh:
         fh.write(old_py)
     state["lab_version"] = "1.4.0"
-    r_f_ps = subprocess.run([PWSH, "-NoProfile", "-File", ps1_copy, "-SelfUpdate", "-Force"], env=env, capture_output=True, text=True)
-    assert r_f_ps.returncode == 0 and "Updated" in r_f_ps.stdout, r_f_ps.stdout + r_f_ps.stderr
-    r_f_py = subprocess.run(["python3", py_copy, "--self-update", "--force"], env=env, capture_output=True, text=True)
+    if not SKIP_PS1:
+        r_f_ps = subprocess.run(ps_base_cmd() + ["-File", ps1_copy, "-SelfUpdate", "-Force"], env=env, capture_output=True, text=True)
+        assert r_f_ps.returncode == 0 and "Updated" in r_f_ps.stdout, r_f_ps.stdout + r_f_ps.stderr
+    r_f_py = subprocess.run([PYTHON, py_copy, "--self-update", "--force"], env=env, capture_output=True, text=True)
     assert r_f_py.returncode == 0 and "Updated" in r_f_py.stdout, r_f_py.stdout + r_f_py.stderr
 
     srv.shutdown()
+
+
+def test_resilient_transport(cert, key):
+    """Verify recovery from mid-stream HTTP/1.1 chunked IncompleteRead + gzip decompression."""
+    spec = importlib.util.spec_from_file_location("create_prism_role_mod", PY)
+    cpr = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cpr)
+
+    attempts = {"n": 0, "saw_gzip": False}
+
+    class TruncatingHandler(http.server.BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            if "gzip" in (self.headers.get("Accept-Encoding") or "").lower():
+                attempts["saw_gzip"] = True
+            attempts["n"] += 1
+            if attempts["n"] <= 2:
+                self.send_response(200)
+                self.send_header("Transfer-Encoding", "chunked")
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b"1000\r\n" + b'{"data": [' + b" " * 100)
+                self.wfile.flush()
+                self.close_connection = True
+                return
+            body = json.dumps({
+                "data": [{"extId": "op-1", "displayName": "View User"}],
+                "metadata": {"totalAvailableResults": 1},
+            }).encode()
+            gz = gzip.compress(body)
+            self.send_response(200)
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(gz)))
+            self.end_headers()
+            self.wfile.write(gz)
+            self.close_connection = True
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), TruncatingHandler)
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(cert, key)
+    srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"https://127.0.0.1:{srv.server_address[1]}"
+    prism = cpr.Prism(url, "admin", "secret", insecure=True)
+    rows = list(cpr.pages(prism, "/api/iam/v4.0/authz/operations"))
+    srv.shutdown()
+    assert len(rows) == 1 and rows[0]["displayName"] == "View User"
+    assert attempts["n"] == 3 and attempts["saw_gzip"], attempts
+
+
+def test_interactive_pty(ps1_ops, cert, key):
+    """Verify interactive terminal prompts, masked passwords, and 8-endpoint verify on POSIX."""
+    if os.name != "posix":
+        return False
+    import pty
+
+    srv, url, _ = start_pc_mock(ps1_ops, cert, key, mode="pc75_strict")
+    master, slave = pty.openpty()
+    clean_env = {k: v for k, v in os.environ.items() if not k.startswith(("PRISM_", "NKP_"))}
+    proc = subprocess.Popen(
+        [PYTHON, PY],
+        stdin=slave, stdout=slave, stderr=slave, env=clean_env, close_fds=True,
+    )
+    os.close(slave)
+
+    qa = [
+        (b"Prism Central IP or URL", url + "\n"),
+        (b"Role name [NKP Cluster Create]:", "\n"),
+        (b"Existing Prism Central user for NKP:", "nkp-svc\n"),
+        (b"Prism Central admin user [admin]:", "\n"),
+        (b"Password for admin:", "secret\n"),
+        (b"Optional password for nkp-svc", "nkpsecret\n"),
+    ]
+    buf = b""
+    idx = 0
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        r, _, _ = select.select([master], [], [], 0.1)
+        if r:
+            try:
+                chunk = os.read(master, 4096)
+            except OSError:
+                break
+            if not chunk:
+                break
+            buf += chunk
+            if idx < len(qa) and qa[idx][0] in buf:
+                os.write(master, qa[idx][1].encode())
+                idx += 1
+        elif proc.poll() is not None:
+            break
+    os.close(master)
+    rc = proc.wait(timeout=5)
+    srv.shutdown()
+    out = buf.decode(errors="replace")
+    assert rc == 0, f"Interactive PTY failed (rc={rc}):\n{out}"
+    assert "All 8 NKP API permission checks passed as nkp-svc" in out, out
+    assert "secret" not in out.split("Password for admin:")[1], "Admin password leaked to stdout!"
+    return True
 
 
 def main():
@@ -432,24 +574,26 @@ def main():
         k = re.sub(r"\s+", " ", re.sub(r"[_-]", " ", name)).strip().lower()
         assert k not in seen, f"Duplicate op: {seen[k]} vs {name}"
         seen[k] = name
-    subprocess.run(["python3", "-m", "py_compile", PY], check=True)
-    ast_chk = subprocess.run(
-        [
-            PWSH, "-NoProfile", "-Command",
-            f'$t=$null;$e=$null;$null=[System.Management.Automation.Language.Parser]::ParseFile("{PS1}",[ref]$t,[ref]$e);if($e.Count){{$e|ForEach-Object{{Write-Error $_}};exit 1}}',
-        ],
-        capture_output=True,
-        text=True,
-    )
-    assert ast_chk.returncode == 0, f"PS1 AST error: {ast_chk.stderr}"
-    print(f"[PASS 0] Parity ({len(ps1_ops)} ops, 0 dups), Python py_compile, PS1 AST parse")
+    subprocess.run([PYTHON, "-m", "py_compile", PY], check=True)
+    if not SKIP_PS1:
+        ast_chk = subprocess.run(
+            ps_base_cmd() + [
+                "-Command",
+                f'$t=$null;$e=$null;$null=[System.Management.Automation.Language.Parser]::ParseFile("{PS1}",[ref]$t,[ref]$e);if($e.Count){{$e|ForEach-Object{{Write-Error $_}};exit 1}}',
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert ast_chk.returncode == 0, f"PS1 AST error: {ast_chk.stderr}"
+    mode_label = f"PS1 ({os.path.basename(PWSH)}) + Python" if not SKIP_PS1 else "Python only"
+    print(f"[PASS 0] Parity ({len(ps1_ops)} ops, 0 dups), py_compile, AST [{mode_label}]")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         cert, key = make_self_signed_cert(tmpdir)
 
         def run_ps1(url, extra=None):
-            cmd = [
-                PWSH, "-NoProfile", "-File", PS1, "-PrismIp", url, "-RoleName", "NKP Master Role",
+            cmd = ps_base_cmd() + [
+                "-File", PS1, "-PrismIp", url, "-RoleName", "NKP Master Role",
                 "-NkpUser", "nkp-svc", "-AdminUser", "admin", "-AdminPassword", "secret",
             ] + (extra or [])
             r = subprocess.run(cmd, capture_output=True, text=True)
@@ -462,40 +606,47 @@ def main():
                 NKP_PC_USER="nkp-svc", NKP_ROLE_NAME="NKP Master Role",
             )
             env.update(extra_env or {})
-            r = subprocess.run(["python3", PY] + (args or []), env=env, capture_output=True, text=True)
+            r = subprocess.run([PYTHON, PY] + (args or []), env=env, capture_output=True, text=True)
             assert r.returncode == 0, f"PY failed:\n{r.stdout}\n{r.stderr}"
             return r.stdout
 
         # Scenario 1
         srv, url, st = start_pc_mock(ps1_ops, cert, key, "pc75_strict")
-        out_ps1 = run_ps1(url, ["-NkpPassword", "nkpsecret"])
+        if not SKIP_PS1:
+            out_ps1 = run_ps1(url, ["-NkpPassword", "nkpsecret"])
+            assert "All 8 NKP API permission checks passed" in out_ps1
+        out_py = run_py(url, {"NKP_PC_PASSWORD": "nkpsecret"})
         op_set = set(next(iter(st["roles"].values()))["operations"])
         assert st["ids"]["hop1"] in op_set and st["ids"]["hop2"] in op_set and st["ids"]["hop3"] in op_set
         assert st["ids"]["internal"] not in op_set and st["ids"]["sysonly"] not in op_set
         assert st["ids"]["auto_view"] in op_set
         assert len(op_set) == len(ps1_ops) + 4
-        assert "All 8 NKP API permission checks passed" in out_ps1
-        out_py = run_py(url, {"NKP_PC_PASSWORD": "nkpsecret"})
         assert "All 8 NKP API permission checks passed" in out_py
-        assert st["role_puts"] == 1 and st["policy_puts"] == 1
+        if not SKIP_PS1:
+            assert st["role_puts"] == 1 and st["policy_puts"] == 1
         srv.shutdown()
         print(f"[PASS 1] PC 7.5.1.8 strict correlated-deps + 3-hop cycle + auto-View + 8-endpoint verify ({len(op_set)} ops)")
 
         # Scenario 2
         srv, url, st = start_pc_mock(ps1_ops, cert, key, mode="pc75_412_retry")
-        run_ps1(url)
-        assert st["role_puts"] == 1 and st["policy_puts"] == 1
-        st["fail_first_put_412"] = True
-        run_py(url)
-        assert st["role_puts"] == 2 and st["policy_puts"] == 2
+        if not SKIP_PS1:
+            run_ps1(url)
+            assert st["role_puts"] == 1 and st["policy_puts"] == 1
+            st["fail_first_put_412"] = True
+            run_py(url)
+            assert st["role_puts"] == 2 and st["policy_puts"] == 2
+        else:
+            run_py(url)
+            assert st["role_puts"] == 1 and st["policy_puts"] == 1
         srv.shutdown()
-        print("[PASS 2] In-place Role + Policy UPDATE with 412 ETag retry (PS1 + Python)")
+        print(f"[PASS 2] In-place Role + Policy UPDATE with 412 ETag retry ({mode_label})")
 
         # Scenario 3
         srv, url, st = start_pc_mock(ps1_ops, cert, key, "pc75_omit_list_related")
-        run_ps1(url)
-        assert st["detail_gets"] > 0 and st["ids"]["hop3"] in set(next(iter(st["roles"].values()))["operations"])
-        st["detail_gets"] = 0
+        if not SKIP_PS1:
+            run_ps1(url)
+            assert st["detail_gets"] > 0 and st["ids"]["hop3"] in set(next(iter(st["roles"].values()))["operations"])
+            st["detail_gets"] = 0
         run_py(url)
         assert st["detail_gets"] > 0 and st["ids"]["hop3"] in set(next(iter(st["roles"].values()))["operations"])
         srv.shutdown()
@@ -503,9 +654,10 @@ def main():
 
         # Scenario 4
         srv, url, st = start_pc_mock(ps1_ops, cert, key, "pc2024_3")
-        out_ps1 = run_ps1(url)
-        assert "IAM v4.0.b1" in out_ps1 and "pc.2024.3.1" in out_ps1
-        assert st["ids"]["hop1"] in set(next(iter(st["roles"].values()))["operations"])
+        if not SKIP_PS1:
+            out_ps1 = run_ps1(url)
+            assert "IAM v4.0.b1" in out_ps1 and "pc.2024.3.1" in out_ps1
+            assert st["ids"]["hop1"] in set(next(iter(st["roles"].values()))["operations"])
         out_py = run_py(url)
         assert "IAM v4.0.b1" in out_py
         srv.shutdown()
@@ -513,19 +665,30 @@ def main():
 
         # Scenario 5
         srv, url, st = start_pc_mock(ps1_ops, cert, key, "pc75_strict")
-        out_ps1 = run_ps1(url, ["-PrintOnly"])
+        if not SKIP_PS1:
+            out_ps1 = run_ps1(url, ["-PrintOnly"])
+            assert "View Virtual Machine Basic Config" in out_ps1 and "Predecessor Hop 3" in out_ps1
         out_py = run_py(url, args=["--print"])
         assert st["posts"] == 0 and st["role_puts"] == 0 and st["policy_puts"] == 0
-        assert "View Virtual Machine Basic Config" in out_ps1 and "Predecessor Hop 3" in out_ps1
         assert "View Virtual Machine Basic Config" in out_py and "Predecessor Hop 3" in out_py
         srv.shutdown()
         print("[PASS 5] -PrintOnly / --print dry-run (0 mutations)")
 
         # Scenario 6
         test_self_update(cert, key, tmpdir)
-        print("[PASS 6] -CheckUpdate / -SelfUpdate & --check-update / --self-update (SHA256 + tamper rejection + .bak)")
+        print("[PASS 6] -CheckUpdate/-SelfUpdate & --check-update/--self-update (3-ver compat + -Force + SHA256 tamper)")
 
-    print("\nALL 7 PRISM ROLE TEST SUITES PASSED!")
+        # Scenario 7
+        test_resilient_transport(cert, key)
+        print("[PASS 7] Resilient HTTP transport (2x chunked IncompleteRead retry + gzip decompression)")
+
+        # Scenario 8
+        if test_interactive_pty(ps1_ops, cert, key):
+            print("[PASS 8] Interactive TTY prompts + masked password + 8-endpoint verify (POSIX)")
+        else:
+            print("[SKIP 8] Interactive PTY test (POSIX only)")
+
+    print("\nALL PRISM ROLE TEST SUITES PASSED!")
 
 
 if __name__ == "__main__":

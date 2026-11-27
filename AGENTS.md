@@ -113,7 +113,7 @@ Run these checks locally before pushing to `main`:
 # 1. Repo hygiene (links, +x/LF, English-only, versions.env sync, render.sh, nkp-update compat tests)
 python3 12-bootstrap-machine/tests/test_repo_hygiene.py
 
-# 2. Prism Central role 7-scenario HTTPS mock suite (PS1 + Python, incl. 3-version self-update compat)
+# 2. Prism Central role 9-scenario HTTPS mock suite (PS1 + Python, 3-ver compat, IncompleteRead/gzip, PTY)
 python3 12-bootstrap-machine/tests/test_prism_role.py
 
 # 3. Shell syntax, ShellCheck, and cloud-init sync
@@ -122,4 +122,6 @@ shellcheck -S error $(find . -name '*.sh' -not -path './.git/*')
 bash 12-bootstrap-machine/scripts/make-offline-cloud-init.sh --check
 ```
 
-After pushing to `main`, confirm both GitHub Actions workflows (`.github/workflows/ci.yml` and `.github/workflows/offline-bundle.yml` when Lab 12 changes) complete with `success`.
+After pushing to `main`, confirm both GitHub Actions workflows complete with `success`:
+- `.github/workflows/ci.yml`: Linux (`lint-shell`, `lint-powershell`, `test-prism-role-linux`, `test-labs-and-hygiene`, `security-scan`), **real Windows (`windows-latest` with Windows PowerShell 5.1 + PowerShell 7)**, and **real macOS (`macos-latest` with Python 3 + PTY + `render.sh`)**.
+- `.github/workflows/offline-bundle.yml`: gated by `gate-linux` and `gate-windows-ps51` before building or publishing any release asset.

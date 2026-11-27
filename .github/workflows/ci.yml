@@ -25,7 +25,7 @@ jobs:
             bash -n "$s"
           done
 
-      - name: Run ShellCheck (errors & warnings)
+      - name: Run ShellCheck (errors)
         run: |
           mapfile -t scripts < <(find . -name '*.sh' -not -path './.git/*' | sort)
           shellcheck -S error "${scripts[@]}"
@@ -36,7 +36,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Parse all PowerShell scripts with PowerShell AST
+      - name: Parse all PowerShell scripts with PowerShell 7 AST
         shell: pwsh
         run: |
           $files = Get-ChildItem -Recurse -Filter '*.ps1'
@@ -61,14 +61,80 @@ jobs:
           }
           Write-Host "PSScriptAnalyzer OK (0 errors)"
 
-  test-prism-role:
+  test-prism-role-linux:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
 
-      - name: Run 7-scenario HTTPS mock suite (create-prism-role.ps1 + .py)
+      - name: Run 9-scenario HTTPS mock suite on Linux (pwsh 7 + Python 3 + PTY + IncompleteRead/gzip)
         run: python3 12-bootstrap-machine/tests/test_prism_role.py
+
+  test-prism-role-windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Parse ALL .ps1 scripts with real Windows PowerShell 5.1 (native codepage/BOM check)
+        shell: powershell
+        run: |
+          $PSVersionTable.PSVersion
+          $files = Get-ChildItem -Recurse -Filter '*.ps1'
+          foreach ($f in $files) {
+              $tokens = $null; $errs = $null
+              $null = [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$tokens, [ref]$errs)
+              if ($errs.Count -gt 0) {
+                  $errs | ForEach-Object { Write-Error "$($f.FullName): $_" }
+                  exit 1
+              }
+              Write-Host "PS 5.1 AST OK: $($f.Name)"
+          }
+
+      - name: Run 9-scenario HTTPS mock suite on real Windows PowerShell 5.1 (powershell.exe)
+        shell: pwsh
+        env:
+          PWSH_BIN: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
+        run: python 12-bootstrap-machine/tests/test_prism_role.py
+
+      - name: Run 9-scenario HTTPS mock suite on Windows PowerShell 7 (pwsh)
+        shell: pwsh
+        env:
+          PWSH_BIN: pwsh
+        run: python 12-bootstrap-machine/tests/test_prism_role.py
+
+  test-prism-role-macos:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Run 9-scenario HTTPS mock suite on real macOS (Python 3 + PTY + IncompleteRead/gzip)
+        env:
+          TEST_SKIP_PS1: "1"
+        run: python3 12-bootstrap-machine/tests/test_prism_role.py
+
+      - name: Verify scripts/render.sh portability on macOS
+        run: |
+          python3 - <<'PY'
+          import re, subprocess, tempfile, os, shutil
+          lines = []
+          for raw in open("local.env.example", encoding="utf-8"):
+              m = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", raw.rstrip("\n"))
+              if m:
+                  k, v = m.group(1), re.sub(r"<[^>]+>", "macos-ci", m.group(2))
+                  lines.append(f"{k}={v or 'bWFjb3MtY2k='}\n")
+              else:
+                  lines.append(raw)
+          with tempfile.TemporaryDirectory() as tmp:
+              env_f = os.path.join(tmp, "local.env")
+              open(env_f, "w", encoding="utf-8").writelines(lines)
+              try:
+                  subprocess.run(["bash", "scripts/render.sh", "all"], env=dict(os.environ, ENV_FILE=env_f), check=True)
+              finally:
+                  shutil.rmtree("rendered", ignore_errors=True)
+          print("[PASS] scripts/render.sh works on macOS")
+          PY
 
   test-labs-and-hygiene:
     runs-on: ubuntu-24.04
@@ -79,7 +145,7 @@ jobs:
       - name: Ensure PyYAML is available
         run: python3 -c "import yaml" 2>/dev/null || pip3 install --break-system-packages pyyaml
 
-      - name: Run repo hygiene, Markdown link, version-drift, and lab render tests
+      - name: Run repo hygiene, English-only, pure-ASCII PS1, links, version-drift, and 3-ver compat tests
         run: python3 12-bootstrap-machine/tests/test_repo_hygiene.py
 
       - name: Verify cloud-init-offline.yaml matches cloud-init.yaml
