@@ -31,6 +31,9 @@ $base = "https://github.com/$Repo/releases/download/offline-bundle"
 $file = Join-Path $OutDir "$Name.tar.gz"
 $sumFile = "$file.sha256"
 $ProgressPreference = 'SilentlyContinue'
+if ($PSVersionTable.PSVersion.Major -lt 6) {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+}
 Write-Host "=== $base/$Name.tar.gz ==="
 $downloaded = $false
 try {
@@ -43,7 +46,14 @@ try {
     Remove-Item -Force $file, $sumFile -ErrorAction SilentlyContinue
 }
 if ($downloaded) {
-    $got = (Get-FileHash -Algorithm SHA256 $file).Hash.ToLower()
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $stream = [System.IO.File]::OpenRead((Resolve-Path -LiteralPath $file).ProviderPath)
+    try {
+        $got = ([BitConverter]::ToString($sha.ComputeHash($stream)) -replace '-', '').ToLowerInvariant()
+    } finally {
+        $stream.Dispose()
+        $sha.Dispose()
+    }
     $expected = ((Get-Content -Raw $sumFile) -split '\s+')[0].ToLower()
     if ($got -ne $expected) {
         Remove-Item -Force $file

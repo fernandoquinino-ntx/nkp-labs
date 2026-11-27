@@ -16,14 +16,20 @@ TARGET="${1:-}"
 # shellcheck disable=SC1090
 set -a; . "$ENV_FILE"; set +a
 
-# Derive substitution keys dynamically from ENV_FILE so new placeholders never need manual sync.
-mapfile -t KEYS < <(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$ENV_FILE" | cut -d= -f1 | sort -u)
+# Derive substitution keys dynamically from ENV_FILE (Bash 3.2 / macOS compatible, no mapfile).
+KEYS=()
+while IFS= read -r _k; do
+  [ -n "${_k}" ] && KEYS+=("${_k}")
+done < <(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$ENV_FILE" | cut -d= -f1 | sort -u)
 
 rm -rf "$OUT"; mkdir -p "$OUT"
+LABS=()
 if [ "$TARGET" = "all" ]; then
-  mapfile -t LABS < <(cd "$ROOT" && for d in [0-9][0-9]-*/; do [ "$d" = "12-bootstrap-machine/" ] && continue; echo "$d"; done)
+  while IFS= read -r _d; do
+    [ -n "${_d}" ] && LABS+=("${_d}")
+  done < <(cd "$ROOT" && for d in [0-9][0-9]-*/; do [ "$d" = "12-bootstrap-machine/" ] && continue; echo "$d"; done)
 else
-  mapfile -t LABS < <(echo "${TARGET%/}/")
+  LABS+=("${TARGET%/}/")
 fi
 
 # Prefer Python 3 for cross-platform (Linux + macOS) substitution safe with `|` and `&` in values.

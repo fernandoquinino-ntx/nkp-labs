@@ -107,13 +107,26 @@ function Test-ScriptCompat {
     return $false
 }
 
+function Get-Sha256Hex([string]$Path) {
+    $full = (Resolve-Path -LiteralPath $Path).ProviderPath
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $stream = [System.IO.File]::OpenRead($full)
+    try {
+        $bytes = $sha.ComputeHash($stream)
+        return ([BitConverter]::ToString($bytes) -replace '-', '').ToLowerInvariant()
+    } finally {
+        $stream.Dispose()
+        $sha.Dispose()
+    }
+}
+
 if ($CheckUpdate -or $SelfUpdate) {
     $ProgressPreference = 'SilentlyContinue'
     $repo = if ($env:NKP_LABS_GH_REPO) { $env:NKP_LABS_GH_REPO } else { 'fernandoquinino-ntx/nkp-labs' }
     $releaseBase = if ($env:NKP_LABS_RELEASE_BASE) { $env:NKP_LABS_RELEASE_BASE.TrimEnd('/') } else { "https://github.com/$repo/releases/download/offline-bundle" }
     $scriptPath = $MyInvocation.MyCommand.Path
     if (-not $scriptPath -or -not (Test-Path $scriptPath)) { throw "Cannot resolve local script path for self-update." }
-    $localHash = (Get-FileHash -Algorithm SHA256 -Path $scriptPath).Hash.ToLower()
+    $localHash = Get-Sha256Hex $scriptPath
 
     $iwrParams = @{ UseBasicParsing = $true }
     if ($PSVersionTable.PSVersion.Major -ge 6) { $iwrParams['SkipCertificateCheck'] = $true }
@@ -154,7 +167,7 @@ if ($CheckUpdate -or $SelfUpdate) {
     $tmpFile = "$scriptPath.new"
     try {
         Invoke-WebRequest @iwrParams -Uri "$releaseBase/create-prism-role.ps1" -OutFile $tmpFile
-        $gotHash = (Get-FileHash -Algorithm SHA256 -Path $tmpFile).Hash.ToLower()
+        $gotHash = Get-Sha256Hex $tmpFile
         if ($gotHash -ne $remoteHash) {
             throw "Downloaded create-prism-role.ps1 sha256 mismatch (expected $remoteHash, got $gotHash). Aborting."
         }

@@ -81,6 +81,19 @@ if ($Rollback) {
     return
 }
 
+function Get-Sha256Hex([string]$Path) {
+    $full = (Resolve-Path -LiteralPath $Path).ProviderPath
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $stream = [System.IO.File]::OpenRead($full)
+    try {
+        $bytes = $sha.ComputeHash($stream)
+        return ([BitConverter]::ToString($bytes) -replace '-', '').ToLowerInvariant()
+    } finally {
+        $stream.Dispose()
+        $sha.Dispose()
+    }
+}
+
 $work = Join-Path $env:TEMP ("nkp-labs-update-" + [guid]::NewGuid().ToString("n"))
 New-Item -ItemType Directory -Force -Path $work | Out-Null
 try {
@@ -98,7 +111,7 @@ try {
         try {
             Invoke-WebRequest -UseBasicParsing -Uri "$releaseBase/nkp-labs-update.tar.gz.sha256" -OutFile $sumFile
             $expected = ((Get-Content -Raw $sumFile) -split '\s+')[0].ToLower()
-            $got = (Get-FileHash -Algorithm SHA256 $payload).Hash.ToLower()
+            $got = Get-Sha256Hex $payload
             if ($got -ne $expected) {
                 throw "sha256 mismatch for nkp-labs-update.tar.gz (expected $expected, got $got)"
             }
